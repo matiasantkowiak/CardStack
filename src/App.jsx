@@ -1,49 +1,70 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { TrendingUp, TrendingDown, AlertTriangle, Plus, Trash2, Save, BarChart3, Calculator, Target, Activity, ChevronRight, Sparkles } from "lucide-react";
 
-// ===== PSA grading tiers (current public pricing as of 2025; user can override) =====
+// ===== PSA grading tiers (Feb 2026 pricing, current as of writing) =====
 const PSA_TIERS = [
-  { id: "bulk",     name: "Bulk",          cost: 19,    maxValue: 199,   turnaround: "65 business days" },
-  { id: "value",    name: "Value",         cost: 25,    maxValue: 499,   turnaround: "45 business days" },
-  { id: "valueplus",name: "Value Plus",    cost: 40,    maxValue: 999,   turnaround: "20 business days" },
-  { id: "regular",  name: "Regular",       cost: 75,    maxValue: 1499,  turnaround: "20 business days" },
-  { id: "express",  name: "Express",       cost: 150,   maxValue: 2499,  turnaround: "10 business days" },
-  { id: "superexp", name: "Super Express", cost: 300,   maxValue: 4999,  turnaround: "5 business days" },
-  { id: "walkthru", name: "Walk-Through",  cost: 600,   maxValue: 9999,  turnaround: "3 business days" },
+  { id: "valuebulk", name: "Value Bulk",    cost: 24.99, maxValue: 500,   turnaround: "140-160 business days", note: "Collectors Club only, 20+ card minimum" },
+  { id: "value",     name: "Value",         cost: 32.99, maxValue: 500,   turnaround: "75 business days" },
+  { id: "valueplus", name: "Value Plus",    cost: 49.99, maxValue: 1000,  turnaround: "45 business days" },
+  { id: "valuemax",  name: "Value Max",     cost: 64.99, maxValue: 2500,  turnaround: "35 business days" },
+  { id: "regular",   name: "Regular",       cost: 79.99, maxValue: 5000,  turnaround: "25 business days" },
+  { id: "express",   name: "Express",       cost: 149,   maxValue: 10000, turnaround: "15 business days" },
+  { id: "superexp",  name: "Super Express", cost: 349,   maxValue: 25000, turnaround: "7 business days" },
+  { id: "walkthru",  name: "Walk-Through",  cost: 350,   maxValue: 50000, turnaround: "5 business days", note: "scales with declared value" },
 ];
 
 // ===== Core calculation engine =====
-function computeEV({ rawCost, salesTaxPct, buyShippingCost, gradeProbabilities, gradePrices, gradingCost, shippingCost, sellFeePct }) {
+// ownsCard mode: rawCost represents the raw SELL price (opportunity cost), not buy price.
+// In this mode, we skip tax/buy shipping and treat raw sell as the alternative outcome.
+function computeEV({ rawCost, salesTaxPct, buyShippingCost, ownsCard, gradeProbabilities, gradePrices, gradingCost, shippingCost, sellFeePct }) {
   const grades = ["psa10", "psa9", "psa8", "psa7orLower"];
-  const salesTax = rawCost * ((salesTaxPct || 0) / 100);
-  const totalCost = rawCost + salesTax + (buyShippingCost || 0) + gradingCost + shippingCost;
+  const feeMultiplier = 1 - sellFeePct / 100;
+
+  let totalCost, opportunityCost = 0;
+  if (ownsCard) {
+    // Already own: cost is only grading + ship to PSA. Raw sell price is the alternative we forgo.
+    totalCost = gradingCost + shippingCost;
+    opportunityCost = rawCost * feeMultiplier; // what you'd net selling raw now
+  } else {
+    // Buying to grade: full acquisition costs included
+    const salesTax = rawCost * ((salesTaxPct || 0) / 100);
+    totalCost = rawCost + salesTax + (buyShippingCost || 0) + gradingCost + shippingCost;
+  }
 
   const outcomes = grades.map((g) => {
     const prob = gradeProbabilities[g] / 100;
     const grossPrice = gradePrices[g];
-    const netPrice = grossPrice * (1 - sellFeePct / 100);
-    const profit = netPrice - totalCost;
+    const netPrice = grossPrice * feeMultiplier;
+    // In "owns" mode, profit = graded net - grading costs - what you gave up by not selling raw
+    // In "buy" mode, profit = graded net - total acquisition cost
+    const profit = ownsCard
+      ? netPrice - totalCost - opportunityCost
+      : netPrice - totalCost;
     return { grade: g, prob, grossPrice, netPrice, profit };
   });
 
   const ev = outcomes.reduce((sum, o) => sum + o.prob * o.profit, 0);
-  const evPlusCost = ev + totalCost;
+  const evPlusCost = ev + totalCost + opportunityCost;
   const variance = outcomes.reduce((sum, o) => sum + o.prob * Math.pow(o.profit - ev, 2), 0);
   const stdDev = Math.sqrt(variance);
   const probOfLoss = outcomes.filter((o) => o.profit < 0).reduce((s, o) => s + o.prob, 0);
   const sharpe = stdDev > 0 ? ev / stdDev : 0;
   const breakEven10Rate = (() => {
-    const p10Profit = gradePrices.psa10 * (1 - sellFeePct / 100) - totalCost;
+    const p10NetProfit = ownsCard
+      ? gradePrices.psa10 * feeMultiplier - totalCost - opportunityCost
+      : gradePrices.psa10 * feeMultiplier - totalCost;
     const otherEV = outcomes.filter((o) => o.grade !== "psa10").reduce((s, o) => {
       const reweighted = o.prob / (1 - gradeProbabilities.psa10 / 100);
       return s + reweighted * o.profit;
     }, 0);
-    if (p10Profit <= otherEV) return null;
-    return (-otherEV / (p10Profit - otherEV)) * 100;
+    if (p10NetProfit <= otherEV) return null;
+    return (-otherEV / (p10NetProfit - otherEV)) * 100;
   })();
-  const roi = totalCost > 0 ? (ev / totalCost) * 100 : 0;
+  // ROI denominator: in owns mode, we're risking the opportunity cost + grading; in buy mode, totalCost.
+  const roiDenominator = ownsCard ? totalCost + opportunityCost : totalCost;
+  const roi = roiDenominator > 0 ? (ev / roiDenominator) * 100 : 0;
 
-  return { outcomes, ev, evPlusCost, stdDev, probOfLoss, sharpe, breakEven10Rate, roi, totalCost };
+  return { outcomes, ev, evPlusCost, stdDev, probOfLoss, sharpe, breakEven10Rate, roi, totalCost, opportunityCost, ownsCard };
 }
 
 // Selection-bias-adjusted estimate of YOUR 10-rate from pop report
@@ -357,10 +378,220 @@ function StressTest({ baseInputs }) {
   );
 }
 
+// ===== Cost / Revenue waterfall =====
+function CostWaterfall({ rawCost, salesTaxPct, buyShippingCost, gradingCost, shippingCost, sellFeePct, result, ownsCard }) {
+  // Build bars showing cost stack vs expected revenue
+  const tax = rawCost * salesTaxPct / 100;
+  const expectedGross = result.outcomes.reduce((s, o) => s + o.prob * o.grossPrice, 0);
+  const sellFee = expectedGross * sellFeePct / 100;
+  const expectedNet = expectedGross - sellFee;
+
+  let bars;
+  if (ownsCard) {
+    bars = [
+      { label: "Raw sell (if not grading)", value: rawCost, color: "amber", type: "alt" },
+      { label: "Grade fee", value: gradingCost, color: "rose", type: "cost" },
+      { label: "Shipping", value: shippingCost, color: "rose", type: "cost" },
+      { label: "Sell fees (est.)", value: sellFee, color: "rose", type: "cost" },
+      { label: "Expected graded sale", value: expectedGross, color: "emerald", type: "rev" },
+    ];
+  } else {
+    bars = [
+      { label: "Raw cost", value: rawCost, color: "rose", type: "cost" },
+      { label: "Sales tax", value: tax, color: "rose", type: "cost" },
+      { label: "Buy shipping", value: buyShippingCost, color: "rose", type: "cost" },
+      { label: "Grade fee", value: gradingCost, color: "rose", type: "cost" },
+      { label: "Round-trip ship", value: shippingCost, color: "rose", type: "cost" },
+      { label: "Sell fees (est.)", value: sellFee, color: "rose", type: "cost" },
+      { label: "Expected graded sale", value: expectedGross, color: "emerald", type: "rev" },
+    ];
+  }
+
+  const maxVal = Math.max(...bars.map((b) => b.value));
+  const colorMap = {
+    rose: "bg-rose-600/60",
+    amber: "bg-amber-500/60",
+    emerald: "bg-emerald-600/60",
+  };
+  const textMap = {
+    rose: "text-rose-300",
+    amber: "text-amber-300",
+    emerald: "text-emerald-300",
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">Cost vs Revenue</span>
+      </div>
+      <div className="space-y-1.5">
+        {bars.map((bar, i) => {
+          const widthPct = maxVal > 0 ? (bar.value / maxVal) * 100 : 0;
+          return (
+            <div key={i} className="grid grid-cols-[130px_1fr_70px] gap-3 items-center">
+              <div className="text-[10px] text-stone-400 truncate">{bar.label}</div>
+              <div className="relative h-5 bg-stone-900 rounded-sm overflow-hidden">
+                <div className={`absolute inset-y-0 left-0 ${colorMap[bar.color]}`} style={{ width: `${widthPct}%` }} />
+              </div>
+              <div className={`text-[11px] font-mono text-right ${textMap[bar.color]}`}>${bar.value.toFixed(2)}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 pt-3 border-t border-stone-800 flex justify-between text-[10px] font-mono">
+        <span className="text-stone-500">Expected profit (net of all fees)</span>
+        <span className={result.ev >= 0 ? "text-emerald-400" : "text-rose-400"}>{result.ev >= 0 ? "+" : ""}${result.ev.toFixed(2)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ===== Risk / Reward scatter =====
+function RiskRewardScatter({ outcomes }) {
+  const labels = { psa10: "10", psa9: "9", psa8: "8", psa7orLower: "≤7" };
+  const w = 100, h = 100;
+  const maxProb = Math.max(...outcomes.map((o) => o.prob), 0.01);
+  const maxAbsProfit = Math.max(...outcomes.map((o) => Math.abs(o.profit)), 1);
+
+  // Map probability (x) and profit (y) to viewBox coords
+  const points = outcomes.map((o) => {
+    const x = (o.prob / maxProb) * 85 + 8; // 8-93
+    const y = h / 2 - (o.profit / maxAbsProfit) * (h / 2 - 8);
+    return { ...o, x, y };
+  });
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">Risk vs Reward</span>
+      </div>
+      <div className="relative bg-stone-900 rounded-sm p-3 h-44">
+        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-full overflow-visible">
+          {/* Grid */}
+          <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="rgb(68 64 60)" strokeWidth="0.3" strokeDasharray="1,1" />
+          <line x1="8" y1="0" x2="8" y2={h} stroke="rgb(68 64 60)" strokeWidth="0.3" strokeDasharray="1,1" />
+          {/* Quadrant labels */}
+          <text x="93" y="8" fontSize="3" fill="rgb(120 113 108)" textAnchor="end">+ profit</text>
+          <text x="93" y={h - 3} fontSize="3" fill="rgb(120 113 108)" textAnchor="end">− loss</text>
+          {/* Points */}
+          {points.map((p) => {
+            const positive = p.profit >= 0;
+            const radius = 2 + Math.sqrt(p.prob) * 6;
+            return (
+              <g key={p.grade}>
+                <circle cx={p.x} cy={p.y} r={radius} fill={positive ? "rgb(16 185 129)" : "rgb(239 68 68)"} fillOpacity="0.35" stroke={positive ? "rgb(16 185 129)" : "rgb(239 68 68)"} strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+                <text x={p.x} y={p.y + 1} fontSize="3" fill={positive ? "rgb(187 247 208)" : "rgb(254 202 202)"} textAnchor="middle" fontFamily="ui-monospace, monospace">{labels[p.grade]}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="mt-2 text-[10px] text-stone-500 leading-relaxed font-light">
+        Bubble size = probability. Above midline = profit, below = loss. The PSA 10 bubble is your "moonshot"; the lower grades show downside risk.
+      </div>
+    </div>
+  );
+}
+
+// ===== Monte Carlo simulation =====
+function MonteCarloDistribution({ outcomes, runs = 5000 }) {
+  // Run simulation
+  const cumulative = [];
+  let acc = 0;
+  for (const o of outcomes) {
+    acc += o.prob;
+    cumulative.push({ grade: o.grade, profit: o.profit, cum: acc });
+  }
+
+  const results = [];
+  for (let i = 0; i < runs; i++) {
+    const r = Math.random();
+    for (const c of cumulative) {
+      if (r <= c.cum) {
+        results.push(c.profit);
+        break;
+      }
+    }
+  }
+
+  // Histogram
+  const minProfit = Math.min(...results);
+  const maxProfit = Math.max(...results);
+  const range = maxProfit - minProfit || 1;
+  const numBuckets = 20;
+  const buckets = Array(numBuckets).fill(0);
+  results.forEach((p) => {
+    const idx = Math.min(Math.floor(((p - minProfit) / range) * numBuckets), numBuckets - 1);
+    buckets[idx]++;
+  });
+  const maxCount = Math.max(...buckets);
+
+  // P5/P50/P95
+  const sorted = [...results].sort((a, b) => a - b);
+  const p5 = sorted[Math.floor(runs * 0.05)];
+  const p50 = sorted[Math.floor(runs * 0.50)];
+  const p95 = sorted[Math.floor(runs * 0.95)];
+
+  // Find bucket containing zero
+  const zeroBucket = Math.min(Math.floor(((0 - minProfit) / range) * numBuckets), numBuckets - 1);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3 justify-between">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">Monte Carlo · {runs.toLocaleString()} sims</span>
+        <span className="text-[9px] text-stone-600 font-mono">profit distribution</span>
+      </div>
+      <div className="relative bg-stone-900 rounded-sm p-3 h-44">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+          {buckets.map((count, i) => {
+            const height = (count / maxCount) * 90;
+            const x = (i / numBuckets) * 100;
+            const w = 100 / numBuckets - 0.5;
+            const bucketStart = minProfit + (i / numBuckets) * range;
+            const bucketEnd = minProfit + ((i + 1) / numBuckets) * range;
+            const positive = bucketStart >= 0;
+            const straddlesZero = bucketStart < 0 && bucketEnd > 0;
+            return (
+              <rect
+                key={i}
+                x={x}
+                y={100 - height - 5}
+                width={w}
+                height={height}
+                fill={positive ? "rgb(16 185 129)" : straddlesZero ? "rgb(120 113 108)" : "rgb(239 68 68)"}
+                fillOpacity="0.55"
+              />
+            );
+          })}
+          {/* Zero line */}
+          {minProfit < 0 && maxProfit > 0 && (
+            <line
+              x1={((-minProfit / range) * 100).toFixed(2)}
+              y1="0"
+              x2={((-minProfit / range) * 100).toFixed(2)}
+              y2="100"
+              stroke="rgb(245 158 11)"
+              strokeWidth="0.4"
+              strokeDasharray="1,1"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+        </svg>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
+        <div className="text-stone-500">P5 (bad case): <span className={p5 < 0 ? "text-rose-400 font-mono" : "text-emerald-400 font-mono"}>{p5 >= 0 ? "+" : ""}${p5.toFixed(0)}</span></div>
+        <div className="text-stone-500 text-center">P50 (median): <span className={p50 < 0 ? "text-rose-400 font-mono" : "text-emerald-400 font-mono"}>{p50 >= 0 ? "+" : ""}${p50.toFixed(0)}</span></div>
+        <div className="text-stone-500 text-right">P95 (good case): <span className="text-emerald-400 font-mono">+${p95.toFixed(0)}</span></div>
+      </div>
+    </div>
+  );
+}
+
 // ===== Main app =====
 export default function CardGradingEV() {
   const [cardName, setCardName] = useState("");
   const [cardImage, setCardImage] = useState(""); // data URL or http URL
+  const [ownsCard, setOwnsCard] = useState(false); // false = buying to grade, true = already owns
   const [rawCost, setRawCost] = useState(50);
   const [salesTaxPct, setSalesTaxPct] = useState(8);
   const [buyShippingCost, setBuyShippingCost] = useState(5);
@@ -414,13 +645,14 @@ export default function CardGradingEV() {
         rawCost,
         salesTaxPct,
         buyShippingCost,
+        ownsCard,
         gradeProbabilities: probabilities,
         gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
         gradingCost: tier.cost,
         shippingCost,
         sellFeePct,
       }),
-    [rawCost, salesTaxPct, buyShippingCost, probabilities, pricePSA10, pricePSA9, pricePSA8, priceLower, tier.cost, shippingCost, sellFeePct]
+    [rawCost, salesTaxPct, buyShippingCost, ownsCard, probabilities, pricePSA10, pricePSA9, pricePSA8, priceLower, tier.cost, shippingCost, sellFeePct]
   );
 
   const evTone = result.ev > 50 ? "positive" : result.ev < 0 ? "negative" : "warning";
@@ -433,6 +665,7 @@ export default function CardGradingEV() {
       image: cardImage || "",
       rawCost,
       tier: tier.name,
+      mode: ownsCard ? "owns" : "buy",
       ev: result.ev,
       roi: result.roi,
       probOfLoss: result.probOfLoss,
@@ -516,27 +749,66 @@ export default function CardGradingEV() {
                 <div className="space-y-4 mt-4">
                   <TextField label="Card Description" value={cardName} onChange={setCardName} placeholder="e.g. 2018 Prizm Luka Dončić #280" />
                   <CardImageInput value={cardImage} onChange={setCardImage} />
+
+                  {/* Mode toggle */}
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">Scenario</div>
+                    <div className="flex gap-1 bg-stone-900 p-1 rounded-sm border border-stone-800">
+                      <button
+                        onClick={() => setOwnsCard(false)}
+                        className={`flex-1 py-2 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
+                          !ownsCard ? "bg-stone-800 text-amber-400" : "text-stone-500 hover:text-stone-300"
+                        }`}
+                      >
+                        Buying to Grade
+                      </button>
+                      <button
+                        onClick={() => setOwnsCard(true)}
+                        className={`flex-1 py-2 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
+                          ownsCard ? "bg-stone-800 text-amber-400" : "text-stone-500 hover:text-stone-300"
+                        }`}
+                      >
+                        Already Own It
+                      </button>
+                    </div>
+                    <div className="mt-2 text-[10px] text-stone-500 italic leading-relaxed">
+                      {ownsCard
+                        ? "Comparing: grade & sell vs. sell raw now. What you paid for the card is a sunk cost — ignore it."
+                        : "Comparing: buy raw, grade, and sell vs. doing nothing."}
+                    </div>
+                  </div>
                 </div>
               </section>
 
-              {/* Buy costs */}
-              <section>
-                <SectionHeader num="02" title="Buy Costs" />
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                  <NumField label="Raw Buy Price" value={rawCost} onChange={setRawCost} prefix="$" />
-                  <NumField label="Sales Tax" value={salesTaxPct} onChange={setSalesTaxPct} suffix="%" hint="varies by state" />
-                  <NumField label="Shipping to You" value={buyShippingCost} onChange={setBuyShippingCost} prefix="$" hint="from seller" />
-                  <NumField label="Sell Fee" value={sellFeePct} onChange={setSellFeePct} suffix="%" hint="eBay ≈13%" />
-                </div>
-                <div className="mt-3 px-3 py-2 bg-stone-900/50 border border-stone-800 rounded-sm flex justify-between text-[11px] font-mono">
-                  <span className="text-stone-500">All-in buy cost</span>
-                  <span className="text-stone-300">${(rawCost + rawCost * salesTaxPct / 100 + buyShippingCost).toFixed(2)}</span>
-                </div>
-              </section>
+              {/* Buy/sell costs section — adapts to mode */}
+              {!ownsCard ? (
+                <section>
+                  <SectionHeader num="02" title="Buy Costs" />
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <NumField label="Raw Buy Price" value={rawCost} onChange={setRawCost} prefix="$" />
+                    <NumField label="Sales Tax" value={salesTaxPct} onChange={setSalesTaxPct} suffix="%" hint="varies by state" />
+                    <NumField label="Shipping to You" value={buyShippingCost} onChange={setBuyShippingCost} prefix="$" hint="from seller" />
+                  </div>
+                  <div className="mt-3 px-3 py-2 bg-stone-900/50 border border-stone-800 rounded-sm flex justify-between text-[11px] font-mono">
+                    <span className="text-stone-500">All-in buy cost</span>
+                    <span className="text-stone-300">${(rawCost + rawCost * salesTaxPct / 100 + buyShippingCost).toFixed(2)}</span>
+                  </div>
+                </section>
+              ) : (
+                <section>
+                  <SectionHeader num="02" title="Opportunity Cost" />
+                  <div className="mt-4">
+                    <NumField label="Raw Sell Price Today" value={rawCost} onChange={setRawCost} prefix="$" hint="what you'd net selling raw" />
+                  </div>
+                  <div className="mt-3 px-3 py-2 bg-amber-950/20 border border-amber-900/40 rounded-sm text-[10px] text-amber-300/80 italic leading-relaxed">
+                    By grading, you give up the chance to sell raw at this price. That's the real "cost" of grading a card you already own.
+                  </div>
+                </section>
+              )}
 
               {/* Grading tier */}
               <section>
-                <SectionHeader num="03" title="Grading" />
+                <SectionHeader num="03" title="Grading & Sell" />
                 <div className="space-y-3 mt-4">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">PSA Tier</div>
@@ -551,6 +823,9 @@ export default function CardGradingEV() {
                         </option>
                       ))}
                     </select>
+                    {tier.note && (
+                      <div className="mt-2 text-[10px] text-stone-500 italic">{tier.note}</div>
+                    )}
                     {pricePSA10 > tier.maxValue && (
                       <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
                         <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
@@ -558,7 +833,10 @@ export default function CardGradingEV() {
                       </div>
                     )}
                   </div>
-                  <NumField label="Shipping (Round Trip + Insurance)" value={shippingCost} onChange={setShippingCost} prefix="$" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <NumField label="Round-Trip Shipping" value={shippingCost} onChange={setShippingCost} prefix="$" hint="+ insurance" />
+                    <NumField label="Sell Fee" value={sellFeePct} onChange={setSellFeePct} suffix="%" hint="eBay ≈13%" />
+                  </div>
                 </div>
               </section>
 
@@ -671,10 +949,12 @@ export default function CardGradingEV() {
                     <img src={cardImage} alt="" className="w-16 h-22 object-contain bg-stone-950 border border-stone-700 rounded-sm flex-shrink-0" style={{ height: '88px' }} />
                   )}
                   <div className="min-w-0">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-medium">Evaluating</div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-medium">{ownsCard ? "Grading Decision" : "Evaluating"}</div>
                     <div className="text-stone-100 text-base truncate">{cardName || "Untitled card"}</div>
                     <div className="text-[10px] text-stone-500 font-mono mt-1">
-                      ${rawCost.toFixed(2)} raw + ${(rawCost * salesTaxPct / 100).toFixed(2)} tax + ${buyShippingCost.toFixed(2)} ship + ${tier.cost} grade
+                      {ownsCard
+                        ? `${tier.cost.toFixed(2)} grade + $${shippingCost.toFixed(2)} ship · risking $${(rawCost * (1 - sellFeePct/100)).toFixed(2)} raw sell`
+                        : `$${rawCost.toFixed(2)} raw + $${(rawCost * salesTaxPct / 100).toFixed(2)} tax + $${buyShippingCost.toFixed(2)} ship + $${tier.cost} grade`}
                     </div>
                   </div>
                 </div>
@@ -751,6 +1031,30 @@ export default function CardGradingEV() {
                 </div>
               </div>
 
+              {/* Cost waterfall + risk/reward scatter side by side */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="border border-stone-800 rounded-sm p-5">
+                  <CostWaterfall
+                    rawCost={rawCost}
+                    salesTaxPct={salesTaxPct}
+                    buyShippingCost={buyShippingCost}
+                    gradingCost={tier.cost}
+                    shippingCost={shippingCost}
+                    sellFeePct={sellFeePct}
+                    result={result}
+                    ownsCard={ownsCard}
+                  />
+                </div>
+                <div className="border border-stone-800 rounded-sm p-5">
+                  <RiskRewardScatter outcomes={result.outcomes} />
+                </div>
+              </div>
+
+              {/* Monte Carlo */}
+              <div className="border border-stone-800 rounded-sm p-5">
+                <MonteCarloDistribution outcomes={result.outcomes} />
+              </div>
+
               {/* Stress test */}
               <div className="border border-stone-800 rounded-sm p-5">
                 <StressTest
@@ -758,6 +1062,7 @@ export default function CardGradingEV() {
                     rawCost,
                     salesTaxPct,
                     buyShippingCost,
+                    ownsCard,
                     gradeProbabilities: probabilities,
                     gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
                     gradingCost: tier.cost,

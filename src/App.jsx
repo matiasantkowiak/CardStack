@@ -13,9 +13,10 @@ const PSA_TIERS = [
 ];
 
 // ===== Core calculation engine =====
-function computeEV({ rawCost, gradeProbabilities, gradePrices, gradingCost, shippingCost, sellFeePct }) {
+function computeEV({ rawCost, salesTaxPct, buyShippingCost, gradeProbabilities, gradePrices, gradingCost, shippingCost, sellFeePct }) {
   const grades = ["psa10", "psa9", "psa8", "psa7orLower"];
-  const totalCost = rawCost + gradingCost + shippingCost;
+  const salesTax = rawCost * ((salesTaxPct || 0) / 100);
+  const totalCost = rawCost + salesTax + (buyShippingCost || 0) + gradingCost + shippingCost;
 
   const outcomes = grades.map((g) => {
     const prob = gradeProbabilities[g] / 100;
@@ -116,6 +117,102 @@ function TextField({ label, value, onChange, placeholder }) {
         className="w-full bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none transition-colors placeholder:text-stone-600"
       />
     </label>
+  );
+}
+
+// Card image: supports drag-drop upload, file picker, paste URL.
+// Stores as data URL (from upload) or http URL (from paste).
+function CardImageInput({ value, onChange }) {
+  const [urlMode, setUrlMode] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const fileInputRef = React.useRef(null);
+
+  const handleFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Image too large. Try one under 5MB or use a URL.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => onChange(e.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    handleFile(e.dataTransfer.files?.[0]);
+  };
+
+  const handlePaste = () => {
+    if (urlInput.trim()) {
+      onChange(urlInput.trim());
+      setUrlInput("");
+      setUrlMode(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">Card Image</div>
+      {value ? (
+        <div className="relative group">
+          <img src={value} alt="Card" className="w-full h-48 object-contain bg-stone-900 border border-stone-700 rounded-sm" />
+          <button
+            onClick={() => onChange("")}
+            className="absolute top-2 right-2 bg-stone-950/80 hover:bg-rose-950 text-stone-300 hover:text-rose-300 border border-stone-700 rounded-sm px-2 py-1 text-[10px] uppercase tracking-wider transition-colors"
+          >
+            Remove
+          </button>
+        </div>
+      ) : urlMode ? (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handlePaste()}
+            placeholder="Paste image URL..."
+            className="flex-1 bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none placeholder:text-stone-600"
+          />
+          <button
+            onClick={handlePaste}
+            className="bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs uppercase tracking-wider px-3 rounded-sm font-medium"
+          >
+            Add
+          </button>
+          <button
+            onClick={() => { setUrlMode(false); setUrlInput(""); }}
+            className="text-stone-500 hover:text-stone-300 text-xs px-2"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className="border-2 border-dashed border-stone-700 hover:border-amber-500 bg-stone-900/50 rounded-sm py-8 px-4 text-center cursor-pointer transition-colors"
+        >
+          <div className="text-stone-500 text-xs mb-2">Drag image here, or click to upload</div>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setUrlMode(true); }}
+            className="text-amber-500 hover:text-amber-400 text-[10px] uppercase tracking-wider"
+          >
+            or paste a URL
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => handleFile(e.target.files?.[0])}
+            className="hidden"
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -263,7 +360,10 @@ function StressTest({ baseInputs }) {
 // ===== Main app =====
 export default function CardGradingEV() {
   const [cardName, setCardName] = useState("");
+  const [cardImage, setCardImage] = useState(""); // data URL or http URL
   const [rawCost, setRawCost] = useState(50);
+  const [salesTaxPct, setSalesTaxPct] = useState(8);
+  const [buyShippingCost, setBuyShippingCost] = useState(5);
   const [tierId, setTierId] = useState("value");
   const [shippingCost, setShippingCost] = useState(15);
   const [sellFeePct, setSellFeePct] = useState(13);
@@ -312,13 +412,15 @@ export default function CardGradingEV() {
     () =>
       computeEV({
         rawCost,
+        salesTaxPct,
+        buyShippingCost,
         gradeProbabilities: probabilities,
         gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
         gradingCost: tier.cost,
         shippingCost,
         sellFeePct,
       }),
-    [rawCost, probabilities, pricePSA10, pricePSA9, pricePSA8, priceLower, tier.cost, shippingCost, sellFeePct]
+    [rawCost, salesTaxPct, buyShippingCost, probabilities, pricePSA10, pricePSA9, pricePSA8, priceLower, tier.cost, shippingCost, sellFeePct]
   );
 
   const evTone = result.ev > 50 ? "positive" : result.ev < 0 ? "negative" : "warning";
@@ -328,6 +430,7 @@ export default function CardGradingEV() {
     const entry = {
       id: Date.now(),
       name: cardName,
+      image: cardImage || "",
       rawCost,
       tier: tier.name,
       ev: result.ev,
@@ -412,16 +515,28 @@ export default function CardGradingEV() {
                 <SectionHeader num="01" title="Card" />
                 <div className="space-y-4 mt-4">
                   <TextField label="Card Description" value={cardName} onChange={setCardName} placeholder="e.g. 2018 Prizm Luka Dončić #280" />
-                  <div className="grid grid-cols-2 gap-3">
-                    <NumField label="Raw Buy Price" value={rawCost} onChange={setRawCost} prefix="$" />
-                    <NumField label="Sell Fee" value={sellFeePct} onChange={setSellFeePct} suffix="%" hint="eBay ≈13%" />
-                  </div>
+                  <CardImageInput value={cardImage} onChange={setCardImage} />
+                </div>
+              </section>
+
+              {/* Buy costs */}
+              <section>
+                <SectionHeader num="02" title="Buy Costs" />
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <NumField label="Raw Buy Price" value={rawCost} onChange={setRawCost} prefix="$" />
+                  <NumField label="Sales Tax" value={salesTaxPct} onChange={setSalesTaxPct} suffix="%" hint="varies by state" />
+                  <NumField label="Shipping to You" value={buyShippingCost} onChange={setBuyShippingCost} prefix="$" hint="from seller" />
+                  <NumField label="Sell Fee" value={sellFeePct} onChange={setSellFeePct} suffix="%" hint="eBay ≈13%" />
+                </div>
+                <div className="mt-3 px-3 py-2 bg-stone-900/50 border border-stone-800 rounded-sm flex justify-between text-[11px] font-mono">
+                  <span className="text-stone-500">All-in buy cost</span>
+                  <span className="text-stone-300">${(rawCost + rawCost * salesTaxPct / 100 + buyShippingCost).toFixed(2)}</span>
                 </div>
               </section>
 
               {/* Grading tier */}
               <section>
-                <SectionHeader num="02" title="Grading" />
+                <SectionHeader num="03" title="Grading" />
                 <div className="space-y-3 mt-4">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">PSA Tier</div>
@@ -449,7 +564,7 @@ export default function CardGradingEV() {
 
               {/* Sold comps */}
               <section>
-                <SectionHeader num="03" title="Sold Comps" />
+                <SectionHeader num="04" title="Sold Comps" />
                 <div className="grid grid-cols-2 gap-3 mt-4">
                   <NumField label="PSA 10 Sale Price" value={pricePSA10} onChange={setPricePSA10} prefix="$" />
                   <NumField label="PSA 9 Sale Price" value={pricePSA9} onChange={setPricePSA9} prefix="$" />
@@ -461,7 +576,7 @@ export default function CardGradingEV() {
 
               {/* Probability source */}
               <section>
-                <SectionHeader num="04" title="Grade Probabilities" />
+                <SectionHeader num="05" title="Grade Probabilities" />
                 <div className="flex gap-1 mt-4 mb-4 bg-stone-900 p-1 rounded-sm border border-stone-800">
                   <button
                     onClick={() => setUsePopReport(true)}
@@ -549,6 +664,22 @@ export default function CardGradingEV() {
 
             {/* RIGHT: Output */}
             <div className="space-y-6">
+              {/* Card preview */}
+              {(cardImage || cardName) && (
+                <div className="border border-stone-800 rounded-sm p-4 flex gap-4 items-center bg-stone-900/30">
+                  {cardImage && (
+                    <img src={cardImage} alt="" className="w-16 h-22 object-contain bg-stone-950 border border-stone-700 rounded-sm flex-shrink-0" style={{ height: '88px' }} />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-medium">Evaluating</div>
+                    <div className="text-stone-100 text-base truncate">{cardName || "Untitled card"}</div>
+                    <div className="text-[10px] text-stone-500 font-mono mt-1">
+                      ${rawCost.toFixed(2)} raw + ${(rawCost * salesTaxPct / 100).toFixed(2)} tax + ${buyShippingCost.toFixed(2)} ship + ${tier.cost} grade
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Verdict */}
               <VerdictBadge ev={result.ev} sharpe={result.sharpe} probOfLoss={result.probOfLoss} />
 
@@ -625,6 +756,8 @@ export default function CardGradingEV() {
                 <StressTest
                   baseInputs={{
                     rawCost,
+                    salesTaxPct,
+                    buyShippingCost,
                     gradeProbabilities: probabilities,
                     gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
                     gradingCost: tier.cost,
@@ -662,9 +795,16 @@ export default function CardGradingEV() {
                 </div>
                 {[...watchlist].sort((a, b) => b.sharpe - a.sharpe).map((w) => (
                   <div key={w.id} className="grid grid-cols-[2fr_repeat(5,1fr)_40px] gap-3 px-4 py-3 border-t border-stone-800 hover:bg-stone-900/50 transition-colors items-center text-sm">
-                    <div>
-                      <div className="text-stone-100 font-medium">{w.name}</div>
-                      <div className="text-[10px] text-stone-500 font-mono">{w.tier} · {new Date(w.timestamp).toLocaleDateString()}</div>
+                    <div className="flex items-center gap-3">
+                      {w.image ? (
+                        <img src={w.image} alt="" className="w-10 h-14 object-cover bg-stone-800 border border-stone-700 rounded-sm flex-shrink-0" />
+                      ) : (
+                        <div className="w-10 h-14 bg-stone-900 border border-stone-800 rounded-sm flex-shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-stone-100 font-medium truncate">{w.name}</div>
+                        <div className="text-[10px] text-stone-500 font-mono">{w.tier} · {new Date(w.timestamp).toLocaleDateString()}</div>
+                      </div>
                     </div>
                     <div className="text-right font-mono text-stone-300">{fmt$Full(w.rawCost)}</div>
                     <div className={`text-right font-mono ${w.ev > 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmt$Full(w.ev)}</div>

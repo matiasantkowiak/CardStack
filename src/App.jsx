@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { TrendingUp, TrendingDown, AlertTriangle, Plus, Trash2, Save, BarChart3, Calculator, Target, Activity, ChevronRight, Sparkles } from "lucide-react";
+import { TrendingUp, TrendingDown, AlertTriangle, Plus, Trash2, Save, BarChart3, Calculator, Target, Activity, ChevronRight, Sparkles, Package, X } from "lucide-react";
 
 // ===== PSA grading tiers (Feb 2026 pricing, current as of writing) =====
 const PSA_TIERS = [
@@ -64,7 +64,15 @@ function computeEV({ rawCost, salesTaxPct, buyShippingCost, ownsCard, gradeProba
   const roiDenominator = ownsCard ? totalCost + opportunityCost : totalCost;
   const roi = roiDenominator > 0 ? (ev / roiDenominator) * 100 : 0;
 
-  return { outcomes, ev, evPlusCost, stdDev, probOfLoss, sharpe, breakEven10Rate, roi, totalCost, opportunityCost, ownsCard };
+  // Verdict
+  let verdict;
+  if (ev <= 0) verdict = "AVOID";
+  else if (sharpe < 0.3 || probOfLoss > 0.6) verdict = "HIGH_RISK";
+  else if (sharpe < 0.7) verdict = "MARGINAL";
+  else if (sharpe < 1.5) verdict = "FAVORABLE";
+  else verdict = "STRONG_BUY";
+
+  return { outcomes, ev, evPlusCost, stdDev, probOfLoss, sharpe, breakEven10Rate, roi, totalCost, opportunityCost, ownsCard, verdict };
 }
 
 // Selection-bias-adjusted estimate of YOUR 10-rate from pop report
@@ -105,6 +113,32 @@ const fmtPct = (n) => (n === null || n === undefined || isNaN(n) ? "—" : `${n.
 // ===== Components =====
 
 function NumField({ label, value, onChange, prefix, suffix, step = "any", hint }) {
+  // Local string state lets us show empty while typing, instead of forcing "0"
+  const [localValue, setLocalValue] = useState(String(value));
+
+  // Sync local from prop when value changes externally (e.g. tier switch)
+  React.useEffect(() => {
+    if (parseFloat(localValue) !== value && document.activeElement?.dataset?.numfieldId !== label) {
+      setLocalValue(String(value));
+    }
+  }, [value]);
+
+  const handleChange = (e) => {
+    const raw = e.target.value;
+    setLocalValue(raw);
+    // Only fire onChange when it parses to a valid number
+    const parsed = parseFloat(raw);
+    if (!isNaN(parsed)) onChange(parsed);
+    else if (raw === "" || raw === "-") onChange(0);
+  };
+
+  const handleBlur = () => {
+    // On blur, normalize the display
+    const parsed = parseFloat(localValue);
+    if (isNaN(parsed)) setLocalValue("0");
+    else setLocalValue(String(parsed));
+  };
+
   return (
     <label className="block">
       <div className="flex items-baseline justify-between mb-1.5">
@@ -116,8 +150,11 @@ function NumField({ label, value, onChange, prefix, suffix, step = "any", hint }
         <input
           type="number"
           step={step}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+          value={localValue}
+          data-numfield-id={label}
+          onFocus={(e) => e.target.select()}
+          onChange={handleChange}
+          onBlur={handleBlur}
           className={`w-full bg-stone-900 border border-stone-700 text-stone-100 font-mono text-sm py-2 ${prefix ? "pl-6" : "pl-3"} ${suffix ? "pr-8" : "pr-3"} rounded-sm focus:border-amber-500 focus:outline-none transition-colors`}
         />
         {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 text-sm font-mono">{suffix}</span>}
@@ -296,27 +333,45 @@ function VerdictBadge({ ev, sharpe, probOfLoss }) {
 // ===== Outcome distribution bar chart =====
 function OutcomeChart({ outcomes }) {
   const labels = { psa10: "PSA 10", psa9: "PSA 9", psa8: "PSA 8", psa7orLower: "PSA ≤7" };
-  const max = Math.max(...outcomes.map((o) => Math.abs(o.profit)));
+  const max = Math.max(...outcomes.map((o) => Math.abs(o.profit)), 1);
   return (
-    <div className="space-y-2.5">
-      {outcomes.map((o) => {
-        const pct = max > 0 ? (Math.abs(o.profit) / max) * 100 : 0;
-        const positive = o.profit >= 0;
-        return (
-          <div key={o.grade} className="grid grid-cols-[70px_1fr_90px_70px] gap-3 items-center">
-            <div className="text-xs font-mono text-stone-300">{labels[o.grade]}</div>
-            <div className="relative h-6 bg-stone-900 rounded-sm overflow-hidden">
-              <div className="absolute inset-y-0 left-1/2 w-px bg-stone-700" />
-              <div
-                className={`absolute inset-y-0 ${positive ? "left-1/2 bg-emerald-600/60" : "right-1/2 bg-rose-600/60"} transition-all duration-500`}
-                style={{ width: `${pct / 2}%` }}
-              />
+    <div className="bg-stone-950 border border-stone-800 rounded-sm overflow-hidden">
+      {/* Sub-header */}
+      <div className="grid grid-cols-[60px_1fr_85px_55px] gap-3 px-3 py-1.5 bg-stone-900 text-[9px] uppercase tracking-wider text-stone-500 font-mono border-b border-stone-800">
+        <div>Grade</div>
+        <div className="text-center">P&amp;L Distribution</div>
+        <div className="text-right">Profit</div>
+        <div className="text-right">Prob</div>
+      </div>
+      <div className="divide-y divide-stone-900">
+        {outcomes.map((o) => {
+          const pct = max > 0 ? (Math.abs(o.profit) / max) * 100 : 0;
+          const positive = o.profit >= 0;
+          return (
+            <div key={o.grade} className="grid grid-cols-[60px_1fr_85px_55px] gap-3 items-center px-3 py-2 hover:bg-stone-900/50 transition-colors">
+              <div className="text-[11px] font-mono text-stone-300 font-medium">{labels[o.grade]}</div>
+              <div className="relative h-3.5">
+                {/* Center line */}
+                <div className="absolute inset-y-0 left-1/2 w-px bg-stone-700" />
+                {/* Bar */}
+                <div
+                  className={`absolute inset-y-0 ${positive ? "left-1/2 bg-emerald-500/70" : "right-1/2 bg-rose-500/70"}`}
+                  style={{ width: `${pct / 2}%` }}
+                />
+                {/* End cap line */}
+                <div
+                  className={`absolute inset-y-0 w-px ${positive ? "bg-emerald-300" : "bg-rose-300"}`}
+                  style={positive ? { left: `calc(50% + ${pct / 2}%)` } : { right: `calc(50% + ${pct / 2}%)` }}
+                />
+              </div>
+              <div className={`text-[11px] font-mono text-right tabular-nums ${positive ? "text-emerald-300" : "text-rose-300"}`}>
+                {positive ? "+" : ""}{o.profit.toFixed(2)}
+              </div>
+              <div className="text-[11px] font-mono text-stone-400 text-right tabular-nums">{(o.prob * 100).toFixed(1)}%</div>
             </div>
-            <div className={`text-xs font-mono text-right ${positive ? "text-emerald-400" : "text-rose-400"}`}>{fmt$Full(o.profit)}</div>
-            <div className="text-xs font-mono text-stone-500 text-right">{fmtPct(o.prob * 100)}</div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -324,7 +379,7 @@ function OutcomeChart({ outcomes }) {
 // ===== Stress test (sensitivity to PSA 10 rate) =====
 function StressTest({ baseInputs }) {
   const points = [];
-  for (let p10 = 0; p10 <= 100; p10 += 5) {
+  for (let p10 = 0; p10 <= 100; p10 += 2) {
     const others = 100 - p10;
     const oldOthers = baseInputs.gradeProbabilities.psa9 + baseInputs.gradeProbabilities.psa8 + baseInputs.gradeProbabilities.psa7orLower;
     const scale = oldOthers > 0 ? others / oldOthers : 0;
@@ -337,110 +392,172 @@ function StressTest({ baseInputs }) {
     const result = computeEV({ ...baseInputs, gradeProbabilities: probs });
     points.push({ p10, ev: result.ev });
   }
-  const maxEV = Math.max(...points.map((p) => Math.abs(p.ev)));
+  const maxEV = Math.max(...points.map((p) => Math.abs(p.ev)), 1);
   const breakEvenPoint = points.find((p) => p.ev >= 0);
   const currentP10 = baseInputs.gradeProbabilities.psa10;
+  const currentEV = points.find((p) => p.p10 === Math.round(currentP10 / 2) * 2)?.ev || 0;
 
-  // Build SVG path
   const w = 100, h = 100;
-  const pathD = points.map((p, i) => {
-    const x = (p.p10 / 100) * w;
-    const y = h / 2 - (p.ev / maxEV) * (h / 2 - 5);
-    return `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-  }).join(" ");
+  const yScale = (ev) => h / 2 - (ev / maxEV) * (h / 2 - 6);
+  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${(p.p10 / 100) * w} ${yScale(p.ev)}`).join(" ");
+  // Area fill path
+  const areaD = `${pathD} L ${w} ${h / 2} L 0 ${h / 2} Z`;
+  const isUp = currentEV >= 0;
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <Activity size={12} className="text-amber-500" />
-        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">EV vs. PSA 10 Rate</span>
+      {/* Bloomberg-style ticker header */}
+      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
+        <div className="flex items-center gap-2">
+          <Activity size={10} className="text-amber-500" />
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">EV · PSA 10 RATE</span>
+          <span className="text-[9px] text-stone-600 font-mono">SENSITIVITY</span>
+        </div>
+        <div className="flex items-center gap-3 text-[10px] font-mono">
+          <span className="text-stone-600">{fmtPct(currentP10)}</span>
+          <span className={isUp ? "text-emerald-400" : "text-rose-400"}>
+            {isUp ? "▲" : "▼"} {fmt$(currentEV)}
+          </span>
+        </div>
       </div>
-      <div className="relative bg-stone-900 rounded-sm p-3 h-44">
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-full overflow-visible">
-          <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="rgb(68 64 60)" strokeWidth="0.3" strokeDasharray="1,1" />
+
+      <div className="relative bg-stone-950 border border-stone-800 rounded-sm h-44 overflow-hidden">
+        {/* Grid */}
+        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+          {/* Horizontal grid lines */}
+          {[0, 25, 50, 75, 100].map((pct) => (
+            <line key={`h${pct}`} x1="0" y1={pct} x2={w} y2={pct} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
+          ))}
+          {/* Vertical grid lines */}
+          {[0, 20, 40, 60, 80, 100].map((pct) => (
+            <line key={`v${pct}`} x1={pct} y1="0" x2={pct} y2={h} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
+          ))}
+          {/* Zero line */}
+          <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="rgb(87 83 78)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+          {/* Area fill */}
+          <path d={areaD} fill="rgb(245 158 11)" fillOpacity="0.08" />
+          {/* Curve */}
+          <path d={pathD} fill="none" stroke="rgb(245 158 11)" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
+          {/* Break-even marker */}
           {breakEvenPoint && (
-            <line x1={breakEvenPoint.p10} y1="0" x2={breakEvenPoint.p10} y2={h} stroke="rgb(245 158 11 / 0.4)" strokeWidth="0.3" strokeDasharray="1,1" />
+            <line x1={breakEvenPoint.p10} y1="0" x2={breakEvenPoint.p10} y2={h} stroke="rgb(120 113 108)" strokeWidth="0.3" strokeDasharray="2,2" vectorEffect="non-scaling-stroke" />
           )}
-          <line x1={currentP10} y1="0" x2={currentP10} y2={h} stroke="rgb(244 244 245 / 0.4)" strokeWidth="0.4" />
-          <path d={pathD} fill="none" stroke="rgb(245 158 11)" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
-          <circle cx={currentP10} cy={h / 2 - (points.find((p) => p.p10 === Math.round(currentP10 / 5) * 5)?.ev / maxEV) * (h / 2 - 5)} r="1.2" fill="rgb(245 158 11)" />
+          {/* Current position crosshair */}
+          <line x1={currentP10} y1="0" x2={currentP10} y2={h} stroke="rgb(245 158 11)" strokeWidth="0.4" strokeDasharray="1,1" vectorEffect="non-scaling-stroke" />
+          <line x1="0" y1={yScale(currentEV)} x2={w} y2={yScale(currentEV)} stroke="rgb(245 158 11)" strokeWidth="0.4" strokeDasharray="1,1" vectorEffect="non-scaling-stroke" />
+          {/* Current dot */}
+          <circle cx={currentP10} cy={yScale(currentEV)} r="1.4" fill="rgb(245 158 11)" stroke="rgb(28 25 23)" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
         </svg>
-        <div className="absolute top-2 left-3 text-[9px] text-stone-600 font-mono">+{fmt$(maxEV)}</div>
-        <div className="absolute bottom-2 left-3 text-[9px] text-stone-600 font-mono">-{fmt$(maxEV)}</div>
-        <div className="absolute bottom-2 right-3 text-[9px] text-stone-600 font-mono">100%</div>
+        {/* Y-axis labels */}
+        <div className="absolute top-1 left-2 text-[9px] text-stone-600 font-mono">+{fmt$(maxEV)}</div>
+        <div className="absolute top-1/2 left-2 text-[9px] text-stone-600 font-mono -translate-y-1/2">$0</div>
+        <div className="absolute bottom-1 left-2 text-[9px] text-stone-600 font-mono">-{fmt$(maxEV)}</div>
+        {/* X-axis labels */}
+        <div className="absolute bottom-1 right-12 text-[9px] text-stone-600 font-mono">50%</div>
+        <div className="absolute bottom-1 right-2 text-[9px] text-stone-600 font-mono">100%</div>
+        {/* Break-even ticker */}
+        {breakEvenPoint && (
+          <div
+            className="absolute top-1 text-[9px] font-mono px-1 bg-stone-900 border border-stone-700 text-stone-400"
+            style={{ left: `${breakEvenPoint.p10}%`, transform: "translateX(-50%)" }}
+          >
+            BE {breakEvenPoint.p10}%
+          </div>
+        )}
       </div>
-      <div className="mt-2 text-[10px] text-stone-500 leading-relaxed font-light">
-        {breakEvenPoint
-          ? <>Break-even at <span className="text-amber-400 font-mono">{breakEvenPoint.p10}%</span> PSA 10 rate. You're modeling <span className="text-stone-300 font-mono">{currentP10.toFixed(1)}%</span>.</>
-          : <span>EV remains negative across the entire 10-rate spectrum. Comps are off, costs are too high, or the card isn't worth grading.</span>}
+
+      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] font-mono">
+        <div className="text-stone-500">Current: <span className="text-amber-400">{currentP10.toFixed(1)}%</span></div>
+        <div className="text-stone-500 text-center">Break-even: <span className="text-stone-300">{breakEvenPoint ? `${breakEvenPoint.p10}%` : "N/A"}</span></div>
+        <div className="text-stone-500 text-right">Headroom: <span className={breakEvenPoint && currentP10 > breakEvenPoint.p10 ? "text-emerald-400" : "text-rose-400"}>{breakEvenPoint ? `${(currentP10 - breakEvenPoint.p10).toFixed(1)}pp` : "—"}</span></div>
       </div>
     </div>
   );
 }
 
-// ===== Cost / Revenue waterfall =====
+// ===== Cost / Revenue P&L statement (waterfall) =====
 function CostWaterfall({ rawCost, salesTaxPct, buyShippingCost, gradingCost, shippingCost, sellFeePct, result, ownsCard }) {
-  // Build bars showing cost stack vs expected revenue
   const tax = rawCost * salesTaxPct / 100;
   const expectedGross = result.outcomes.reduce((s, o) => s + o.prob * o.grossPrice, 0);
   const sellFee = expectedGross * sellFeePct / 100;
-  const expectedNet = expectedGross - sellFee;
 
   let bars;
   if (ownsCard) {
     bars = [
-      { label: "Raw sell (if not grading)", value: rawCost, color: "amber", type: "alt" },
-      { label: "Grade fee", value: gradingCost, color: "rose", type: "cost" },
-      { label: "Shipping", value: shippingCost, color: "rose", type: "cost" },
-      { label: "Sell fees (est.)", value: sellFee, color: "rose", type: "cost" },
-      { label: "Expected graded sale", value: expectedGross, color: "emerald", type: "rev" },
+      { label: "GRADED SALE (E)", value: expectedGross, type: "rev" },
+      { label: "Sell fees", value: -sellFee, type: "cost" },
+      { label: "Grading", value: -gradingCost, type: "cost" },
+      { label: "Round-trip ship", value: -shippingCost, type: "cost" },
+      { label: "Raw sell forgone", value: -rawCost * (1 - sellFeePct / 100), type: "alt" },
     ];
   } else {
     bars = [
-      { label: "Raw cost", value: rawCost, color: "rose", type: "cost" },
-      { label: "Sales tax", value: tax, color: "rose", type: "cost" },
-      { label: "Buy shipping", value: buyShippingCost, color: "rose", type: "cost" },
-      { label: "Grade fee", value: gradingCost, color: "rose", type: "cost" },
-      { label: "Round-trip ship", value: shippingCost, color: "rose", type: "cost" },
-      { label: "Sell fees (est.)", value: sellFee, color: "rose", type: "cost" },
-      { label: "Expected graded sale", value: expectedGross, color: "emerald", type: "rev" },
+      { label: "GRADED SALE (E)", value: expectedGross, type: "rev" },
+      { label: "Sell fees", value: -sellFee, type: "cost" },
+      { label: "Raw cost", value: -rawCost, type: "cost" },
+      { label: "Sales tax", value: -tax, type: "cost" },
+      { label: "Buy shipping", value: -buyShippingCost, type: "cost" },
+      { label: "Grading", value: -gradingCost, type: "cost" },
+      { label: "Round-trip ship", value: -shippingCost, type: "cost" },
     ];
   }
 
-  const maxVal = Math.max(...bars.map((b) => b.value));
-  const colorMap = {
-    rose: "bg-rose-600/60",
-    amber: "bg-amber-500/60",
-    emerald: "bg-emerald-600/60",
-  };
-  const textMap = {
-    rose: "text-rose-300",
-    amber: "text-amber-300",
-    emerald: "text-emerald-300",
-  };
+  // Compute running balance + max abs for bar scaling
+  const maxAbs = Math.max(...bars.map((b) => Math.abs(b.value)), 1);
+  let runningTotal = 0;
+  const rows = bars.map((b) => {
+    runningTotal += b.value;
+    return { ...b, runningTotal };
+  });
+
+  const final = runningTotal;
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">Cost vs Revenue</span>
+      {/* Terminal header */}
+      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
+        <div className="flex items-center gap-2">
+          <span className="text-emerald-500 font-mono text-[10px]">▮</span>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">P&amp;L · EXPECTED VALUE</span>
+        </div>
+        <div className={`text-[10px] font-mono px-2 py-0.5 rounded-sm ${final >= 0 ? "bg-emerald-950/40 text-emerald-300 border border-emerald-900/40" : "bg-rose-950/40 text-rose-300 border border-rose-900/40"}`}>
+          NET: {final >= 0 ? "+" : ""}${final.toFixed(2)}
+        </div>
       </div>
-      <div className="space-y-1.5">
-        {bars.map((bar, i) => {
-          const widthPct = maxVal > 0 ? (bar.value / maxVal) * 100 : 0;
+
+      {/* P&L rows */}
+      <div className="space-y-px font-mono text-[11px] bg-stone-950 border border-stone-800 rounded-sm overflow-hidden">
+        {rows.map((bar, i) => {
+          const widthPct = (Math.abs(bar.value) / maxAbs) * 50; // half width max
+          const positive = bar.value >= 0;
           return (
-            <div key={i} className="grid grid-cols-[130px_1fr_70px] gap-3 items-center">
-              <div className="text-[10px] text-stone-400 truncate">{bar.label}</div>
-              <div className="relative h-5 bg-stone-900 rounded-sm overflow-hidden">
-                <div className={`absolute inset-y-0 left-0 ${colorMap[bar.color]}`} style={{ width: `${widthPct}%` }} />
+            <div key={i} className="grid grid-cols-[150px_1fr_85px_90px] items-center px-3 py-1.5 hover:bg-stone-900/50 transition-colors">
+              <div className={`text-[10px] truncate ${bar.type === "rev" ? "text-emerald-400 font-medium" : "text-stone-400"}`}>{bar.label}</div>
+              <div className="relative h-3 mx-2">
+                <div className="absolute inset-y-0 left-1/2 w-px bg-stone-700" />
+                <div
+                  className={`absolute inset-y-0 ${positive ? "left-1/2 bg-emerald-500/60" : "right-1/2 bg-rose-500/60"}`}
+                  style={{ width: `${widthPct}%` }}
+                />
               </div>
-              <div className={`text-[11px] font-mono text-right ${textMap[bar.color]}`}>${bar.value.toFixed(2)}</div>
+              <div className={`text-right tabular-nums ${positive ? "text-emerald-300" : "text-rose-300"}`}>
+                {positive ? "+" : ""}{bar.value.toFixed(2)}
+              </div>
+              <div className="text-right tabular-nums text-stone-500 text-[10px]">
+                = {bar.runningTotal >= 0 ? "+" : ""}{bar.runningTotal.toFixed(2)}
+              </div>
             </div>
           );
         })}
-      </div>
-      <div className="mt-3 pt-3 border-t border-stone-800 flex justify-between text-[10px] font-mono">
-        <span className="text-stone-500">Expected profit (net of all fees)</span>
-        <span className={result.ev >= 0 ? "text-emerald-400" : "text-rose-400"}>{result.ev >= 0 ? "+" : ""}${result.ev.toFixed(2)}</span>
+        {/* Final summary row */}
+        <div className={`grid grid-cols-[150px_1fr_85px_90px] items-center px-3 py-2 border-t border-stone-700 ${final >= 0 ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
+          <div className="text-[10px] uppercase tracking-wider text-stone-300 font-medium">Expected Profit</div>
+          <div></div>
+          <div></div>
+          <div className={`text-right tabular-nums font-medium ${final >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+            {final >= 0 ? "+" : ""}${final.toFixed(2)}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -448,46 +565,101 @@ function CostWaterfall({ rawCost, salesTaxPct, buyShippingCost, gradingCost, shi
 
 // ===== Risk / Reward scatter =====
 function RiskRewardScatter({ outcomes }) {
-  const labels = { psa10: "10", psa9: "9", psa8: "8", psa7orLower: "≤7" };
+  const labels = { psa10: "PSA10", psa9: "PSA9", psa8: "PSA8", psa7orLower: "≤PSA7" };
   const w = 100, h = 100;
   const maxProb = Math.max(...outcomes.map((o) => o.prob), 0.01);
   const maxAbsProfit = Math.max(...outcomes.map((o) => Math.abs(o.profit)), 1);
 
-  // Map probability (x) and profit (y) to viewBox coords
   const points = outcomes.map((o) => {
-    const x = (o.prob / maxProb) * 85 + 8; // 8-93
-    const y = h / 2 - (o.profit / maxAbsProfit) * (h / 2 - 8);
+    const x = (o.prob / maxProb) * 80 + 12;
+    const y = h / 2 - (o.profit / maxAbsProfit) * (h / 2 - 10);
     return { ...o, x, y };
   });
 
+  // Compute the dominant point (highest profit × probability)
+  const dominant = points.reduce((best, p) => (p.profit * p.prob > best.profit * best.prob ? p : best), points[0]);
+
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">Risk vs Reward</span>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-500 font-mono text-[10px]">◆</span>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">RISK · REWARD MATRIX</span>
+        </div>
+        <span className="text-[9px] text-stone-600 font-mono">bubble = probability</span>
       </div>
-      <div className="relative bg-stone-900 rounded-sm p-3 h-44">
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-full overflow-visible">
+
+      <div className="relative bg-stone-950 border border-stone-800 rounded-sm h-44 overflow-hidden">
+        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+          {/* Quadrant tints - profitable top, loss bottom */}
+          <rect x="0" y="0" width={w} height={h / 2} fill="rgb(16 185 129)" fillOpacity="0.03" />
+          <rect x="0" y={h / 2} width={w} height={h / 2} fill="rgb(239 68 68)" fillOpacity="0.03" />
           {/* Grid */}
-          <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="rgb(68 64 60)" strokeWidth="0.3" strokeDasharray="1,1" />
-          <line x1="8" y1="0" x2="8" y2={h} stroke="rgb(68 64 60)" strokeWidth="0.3" strokeDasharray="1,1" />
-          {/* Quadrant labels */}
-          <text x="93" y="8" fontSize="3" fill="rgb(120 113 108)" textAnchor="end">+ profit</text>
-          <text x="93" y={h - 3} fontSize="3" fill="rgb(120 113 108)" textAnchor="end">− loss</text>
+          {[20, 40, 60, 80].map((v) => (
+            <line key={`vg${v}`} x1={v} y1="0" x2={v} y2={h} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
+          ))}
+          {[25, 75].map((v) => (
+            <line key={`hg${v}`} x1="0" y1={v} x2={w} y2={v} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
+          ))}
+          {/* Zero axes */}
+          <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="rgb(87 83 78)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+          <line x1="12" y1="0" x2="12" y2={h} stroke="rgb(87 83 78)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+
           {/* Points */}
           {points.map((p) => {
             const positive = p.profit >= 0;
-            const radius = 2 + Math.sqrt(p.prob) * 6;
+            const radius = 2.5 + Math.sqrt(p.prob) * 7;
+            const isDominant = p.grade === dominant.grade && p.profit > 0;
             return (
               <g key={p.grade}>
-                <circle cx={p.x} cy={p.y} r={radius} fill={positive ? "rgb(16 185 129)" : "rgb(239 68 68)"} fillOpacity="0.35" stroke={positive ? "rgb(16 185 129)" : "rgb(239 68 68)"} strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
-                <text x={p.x} y={p.y + 1} fontSize="3" fill={positive ? "rgb(187 247 208)" : "rgb(254 202 202)"} textAnchor="middle" fontFamily="ui-monospace, monospace">{labels[p.grade]}</text>
+                {isDominant && (
+                  <circle cx={p.x} cy={p.y} r={radius + 1.5} fill="none" stroke="rgb(245 158 11)" strokeWidth="0.4" strokeDasharray="1.5,1" vectorEffect="non-scaling-stroke" />
+                )}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={radius}
+                  fill={positive ? "rgb(16 185 129)" : "rgb(239 68 68)"}
+                  fillOpacity="0.4"
+                  stroke={positive ? "rgb(110 231 183)" : "rgb(252 165 165)"}
+                  strokeWidth="0.5"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <text
+                  x={p.x}
+                  y={p.y + 1}
+                  fontSize="2.4"
+                  fill={positive ? "rgb(220 252 231)" : "rgb(254 226 226)"}
+                  textAnchor="middle"
+                  fontFamily="ui-monospace, monospace"
+                  fontWeight="500"
+                >
+                  {labels[p.grade]}
+                </text>
               </g>
             );
           })}
         </svg>
+
+        {/* Axis labels */}
+        <div className="absolute top-1 right-2 text-[8px] text-emerald-700 font-mono uppercase tracking-wider">↑ profit</div>
+        <div className="absolute bottom-1 right-2 text-[8px] text-rose-700 font-mono uppercase tracking-wider">↓ loss</div>
+        <div className="absolute bottom-1 left-2 text-[8px] text-stone-600 font-mono uppercase tracking-wider">prob →</div>
+
+        {/* Y-axis labels */}
+        <div className="absolute top-1 left-2 text-[9px] text-stone-600 font-mono">+{fmt$(maxAbsProfit)}</div>
+        <div className="absolute bottom-6 left-2 text-[9px] text-stone-600 font-mono">-{fmt$(maxAbsProfit)}</div>
       </div>
-      <div className="mt-2 text-[10px] text-stone-500 leading-relaxed font-light">
-        Bubble size = probability. Above midline = profit, below = loss. The PSA 10 bubble is your "moonshot"; the lower grades show downside risk.
+
+      <div className="mt-2 text-[10px] font-mono text-stone-500">
+        Best risk-adjusted: <span className="text-amber-400">{labels[dominant.grade] || "—"}</span>
+        <span className="text-stone-700"> · </span>
+        <span className="text-stone-400">{fmtPct(dominant.prob * 100)}</span>
+        <span className="text-stone-700"> @ </span>
+        <span className={dominant.profit >= 0 ? "text-emerald-400" : "text-rose-400"}>
+          {dominant.profit >= 0 ? "+" : ""}{fmt$(dominant.profit)}
+        </span>
       </div>
     </div>
   );
@@ -518,7 +690,7 @@ function MonteCarloDistribution({ outcomes, runs = 5000 }) {
   const minProfit = Math.min(...results);
   const maxProfit = Math.max(...results);
   const range = maxProfit - minProfit || 1;
-  const numBuckets = 20;
+  const numBuckets = 30;
   const buckets = Array(numBuckets).fill(0);
   results.forEach((p) => {
     const idx = Math.min(Math.floor(((p - minProfit) / range) * numBuckets), numBuckets - 1);
@@ -526,27 +698,50 @@ function MonteCarloDistribution({ outcomes, runs = 5000 }) {
   });
   const maxCount = Math.max(...buckets);
 
-  // P5/P50/P95
+  // Percentiles
   const sorted = [...results].sort((a, b) => a - b);
   const p5 = sorted[Math.floor(runs * 0.05)];
+  const p25 = sorted[Math.floor(runs * 0.25)];
   const p50 = sorted[Math.floor(runs * 0.50)];
+  const p75 = sorted[Math.floor(runs * 0.75)];
   const p95 = sorted[Math.floor(runs * 0.95)];
+  const mean = sorted.reduce((s, v) => s + v, 0) / runs;
 
-  // Find bucket containing zero
-  const zeroBucket = Math.min(Math.floor(((0 - minProfit) / range) * numBuckets), numBuckets - 1);
+  // Win rate
+  const winCount = sorted.filter((v) => v > 0).length;
+  const winRate = (winCount / runs) * 100;
+
+  // x position helper
+  const xFor = (val) => ((val - minProfit) / range) * 100;
+  const zeroX = xFor(0);
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3 justify-between">
-        <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">Monte Carlo · {runs.toLocaleString()} sims</span>
-        <span className="text-[9px] text-stone-600 font-mono">profit distribution</span>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
+        <div className="flex items-center gap-2">
+          <span className="text-blue-500 font-mono text-[10px]">▦</span>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">MONTE CARLO · DISTRIBUTION</span>
+          <span className="text-[9px] text-stone-600 font-mono">N={runs.toLocaleString()}</span>
+        </div>
+        <div className="flex gap-3 text-[10px] font-mono">
+          <span className="text-stone-500">μ=<span className={mean >= 0 ? "text-emerald-400" : "text-rose-400"}>{mean >= 0 ? "+" : ""}{mean.toFixed(2)}</span></span>
+          <span className="text-stone-500">WIN=<span className="text-stone-300">{winRate.toFixed(1)}%</span></span>
+        </div>
       </div>
-      <div className="relative bg-stone-900 rounded-sm p-3 h-44">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+
+      <div className="relative bg-stone-950 border border-stone-800 rounded-sm h-44 overflow-hidden">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
+          {/* Background grid */}
+          {[20, 40, 60, 80].map((v) => (
+            <line key={`g${v}`} x1="0" y1={v} x2="100" y2={v} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
+          ))}
+
+          {/* Histogram bars */}
           {buckets.map((count, i) => {
-            const height = (count / maxCount) * 90;
+            const height = (count / maxCount) * 88;
             const x = (i / numBuckets) * 100;
-            const w = 100 / numBuckets - 0.5;
+            const barW = 100 / numBuckets - 0.3;
             const bucketStart = minProfit + (i / numBuckets) * range;
             const bucketEnd = minProfit + ((i + 1) / numBuckets) * range;
             const positive = bucketStart >= 0;
@@ -555,33 +750,68 @@ function MonteCarloDistribution({ outcomes, runs = 5000 }) {
               <rect
                 key={i}
                 x={x}
-                y={100 - height - 5}
-                width={w}
+                y={100 - height - 6}
+                width={barW}
                 height={height}
                 fill={positive ? "rgb(16 185 129)" : straddlesZero ? "rgb(120 113 108)" : "rgb(239 68 68)"}
-                fillOpacity="0.55"
+                fillOpacity="0.6"
+                stroke={positive ? "rgb(16 185 129)" : straddlesZero ? "rgb(120 113 108)" : "rgb(239 68 68)"}
+                strokeWidth="0.2"
+                vectorEffect="non-scaling-stroke"
               />
             );
           })}
+
+          {/* P5 line (VaR) */}
+          <line x1={xFor(p5)} y1="0" x2={xFor(p5)} y2="100" stroke="rgb(239 68 68)" strokeWidth="0.5" strokeDasharray="2,1" vectorEffect="non-scaling-stroke" />
+          {/* P50 line (median) */}
+          <line x1={xFor(p50)} y1="0" x2={xFor(p50)} y2="100" stroke="rgb(245 158 11)" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+          {/* P95 line */}
+          <line x1={xFor(p95)} y1="0" x2={xFor(p95)} y2="100" stroke="rgb(16 185 129)" strokeWidth="0.5" strokeDasharray="2,1" vectorEffect="non-scaling-stroke" />
           {/* Zero line */}
           {minProfit < 0 && maxProfit > 0 && (
-            <line
-              x1={((-minProfit / range) * 100).toFixed(2)}
-              y1="0"
-              x2={((-minProfit / range) * 100).toFixed(2)}
-              y2="100"
-              stroke="rgb(245 158 11)"
-              strokeWidth="0.4"
-              strokeDasharray="1,1"
-              vectorEffect="non-scaling-stroke"
-            />
+            <line x1={zeroX} y1="0" x2={zeroX} y2="100" stroke="rgb(244 244 245)" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
           )}
         </svg>
+
+        {/* Floating labels */}
+        <div className="absolute top-1 left-2 text-[9px] text-rose-500 font-mono" style={{ left: `${xFor(p5)}%`, transform: "translateX(-50%)" }}>
+          P5
+        </div>
+        <div className="absolute top-1 text-[9px] text-amber-400 font-mono" style={{ left: `${xFor(p50)}%`, transform: "translateX(-50%)" }}>
+          MED
+        </div>
+        <div className="absolute top-1 text-[9px] text-emerald-400 font-mono" style={{ left: `${xFor(p95)}%`, transform: "translateX(-50%)" }}>
+          P95
+        </div>
+
+        {/* x-axis labels */}
+        <div className="absolute bottom-1 left-2 text-[9px] text-stone-600 font-mono">{fmt$(minProfit)}</div>
+        <div className="absolute bottom-1 right-2 text-[9px] text-stone-600 font-mono">{fmt$(maxProfit)}</div>
       </div>
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
-        <div className="text-stone-500">P5 (bad case): <span className={p5 < 0 ? "text-rose-400 font-mono" : "text-emerald-400 font-mono"}>{p5 >= 0 ? "+" : ""}${p5.toFixed(0)}</span></div>
-        <div className="text-stone-500 text-center">P50 (median): <span className={p50 < 0 ? "text-rose-400 font-mono" : "text-emerald-400 font-mono"}>{p50 >= 0 ? "+" : ""}${p50.toFixed(0)}</span></div>
-        <div className="text-stone-500 text-right">P95 (good case): <span className="text-emerald-400 font-mono">+${p95.toFixed(0)}</span></div>
+
+      {/* Percentile readout */}
+      <div className="mt-2 grid grid-cols-5 gap-1 text-[9px] font-mono">
+        <div className="bg-rose-950/30 border border-rose-900/40 px-2 py-1 rounded-sm">
+          <div className="text-rose-500 uppercase tracking-wider text-[8px]">P5 VaR</div>
+          <div className={`${p5 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p5 >= 0 ? "+" : ""}${p5.toFixed(0)}</div>
+        </div>
+        <div className="bg-stone-900 border border-stone-800 px-2 py-1 rounded-sm">
+          <div className="text-stone-500 uppercase tracking-wider text-[8px]">P25</div>
+          <div className={`${p25 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p25 >= 0 ? "+" : ""}${p25.toFixed(0)}</div>
+        </div>
+        <div className="bg-amber-950/30 border border-amber-900/40 px-2 py-1 rounded-sm">
+          <div className="text-amber-500 uppercase tracking-wider text-[8px]">MEDIAN</div>
+          <div className={`${p50 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p50 >= 0 ? "+" : ""}${p50.toFixed(0)}</div>
+        </div>
+        <div className="bg-stone-900 border border-stone-800 px-2 py-1 rounded-sm">
+          <div className="text-stone-500 uppercase tracking-wider text-[8px]">P75</div>
+          <div className={`${p75 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p75 >= 0 ? "+" : ""}${p75.toFixed(0)}</div>
+        </div>
+        <div className="bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm">
+          <div className="text-emerald-500 uppercase tracking-wider text-[8px]">P95</div>
+          <div className="text-emerald-300">+${p95.toFixed(0)}</div>
+        </div>
       </div>
     </div>
   );
@@ -597,6 +827,7 @@ export default function CardGradingEV() {
   const [buyShippingCost, setBuyShippingCost] = useState(5);
   const [tierId, setTierId] = useState("value");
   const [shippingCost, setShippingCost] = useState(15);
+  const [cardsInSubmission, setCardsInSubmission] = useState(1);
   const [sellFeePct, setSellFeePct] = useState(13);
 
   const [pricePSA10, setPricePSA10] = useState(400);
@@ -619,11 +850,26 @@ export default function CardGradingEV() {
   const [watchlist, setWatchlist] = useState([]);
   const [activeTab, setActiveTab] = useState("input");
 
+  // Submission builder state
+  const [submission, setSubmission] = useState([]);
+  const [submissionTier, setSubmissionTier] = useState("value");
+  const [submissionShipping, setSubmissionShipping] = useState(15);
+  const [submissionSellFee, setSubmissionSellFee] = useState(13);
+
   // Load watchlist from browser localStorage
   useEffect(() => {
     try {
       const stored = localStorage.getItem("watchlist");
       if (stored) setWatchlist(JSON.parse(stored));
+      const sub = localStorage.getItem("submission");
+      if (sub) setSubmission(JSON.parse(sub));
+      const subSettings = localStorage.getItem("submissionSettings");
+      if (subSettings) {
+        const s = JSON.parse(subSettings);
+        if (s.tier) setSubmissionTier(s.tier);
+        if (s.shipping !== undefined) setSubmissionShipping(s.shipping);
+        if (s.sellFee !== undefined) setSubmissionSellFee(s.sellFee);
+      }
     } catch (e) {}
   }, []);
 
@@ -639,6 +885,11 @@ export default function CardGradingEV() {
   const probSum = probabilities.psa10 + probabilities.psa9 + probabilities.psa8 + probabilities.psa7orLower;
   const probsValid = Math.abs(probSum - 100) < 0.5;
 
+  const perCardShipping = useMemo(
+    () => shippingCost / Math.max(1, cardsInSubmission),
+    [shippingCost, cardsInSubmission]
+  );
+
   const result = useMemo(
     () =>
       computeEV({
@@ -649,10 +900,10 @@ export default function CardGradingEV() {
         gradeProbabilities: probabilities,
         gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
         gradingCost: tier.cost,
-        shippingCost,
+        shippingCost: perCardShipping,
         sellFeePct,
       }),
-    [rawCost, salesTaxPct, buyShippingCost, ownsCard, probabilities, pricePSA10, pricePSA9, pricePSA8, priceLower, tier.cost, shippingCost, sellFeePct]
+    [rawCost, salesTaxPct, buyShippingCost, ownsCard, probabilities, pricePSA10, pricePSA9, pricePSA8, priceLower, tier.cost, perCardShipping, sellFeePct]
   );
 
   const evTone = result.ev > 50 ? "positive" : result.ev < 0 ? "negative" : "warning";
@@ -688,6 +939,111 @@ export default function CardGradingEV() {
     } catch (e) {}
   };
 
+  // --- Submission helpers ---
+  const saveSubmission = (next) => {
+    try { localStorage.setItem("submission", JSON.stringify(next)); } catch (e) {}
+  };
+  const saveSubmissionSettings = (next) => {
+    try { localStorage.setItem("submissionSettings", JSON.stringify(next)); } catch (e) {}
+  };
+
+  const addToSubmission = () => {
+    const newCard = {
+      id: Date.now(),
+      name: cardName || "Untitled card",
+      image: cardImage || "",
+      rawCost,
+      ownsCard,
+      pricePSA10,
+      pricePSA9,
+      pricePSA8,
+      priceLower,
+      pPSA10: probabilities.psa10,
+      pPSA9: probabilities.psa9,
+      pPSA8: probabilities.psa8,
+      pLower: probabilities.psa7orLower,
+    };
+    const updated = [newCard, ...submission];
+    setSubmission(updated);
+    saveSubmission(updated);
+  };
+
+  const removeFromSubmission = (id) => {
+    const updated = submission.filter((c) => c.id !== id);
+    setSubmission(updated);
+    saveSubmission(updated);
+  };
+
+  const updateSubmissionCard = (id, field, value) => {
+    const updated = submission.map((c) => c.id === id ? { ...c, [field]: value } : c);
+    setSubmission(updated);
+    saveSubmission(updated);
+  };
+
+  const clearSubmission = () => {
+    if (!confirm("Clear all cards from submission?")) return;
+    setSubmission([]);
+    saveSubmission([]);
+  };
+
+  const updateSubmissionSetting = (key, value) => {
+    if (key === "tier") setSubmissionTier(value);
+    else if (key === "shipping") setSubmissionShipping(value);
+    else if (key === "sellFee") setSubmissionSellFee(value);
+    saveSubmissionSettings({
+      tier: key === "tier" ? value : submissionTier,
+      shipping: key === "shipping" ? value : submissionShipping,
+      sellFee: key === "sellFee" ? value : submissionSellFee,
+    });
+  };
+
+  // Compute per-card and aggregate stats for the submission
+  const submissionResults = useMemo(() => {
+    const submissionTierObj = PSA_TIERS.find((t) => t.id === submissionTier) || PSA_TIERS[1];
+    const n = submission.length;
+    const perCardShip = n > 0 ? submissionShipping / n : submissionShipping;
+
+    const cardResults = submission.map((c) => {
+      const probs = { psa10: c.pPSA10, psa9: c.pPSA9, psa8: c.pPSA8, psa7orLower: c.pLower };
+      const prices = { psa10: c.pricePSA10, psa9: c.pricePSA9, psa8: c.pricePSA8, psa7orLower: c.priceLower };
+      const costs = {
+        rawCost: c.rawCost,
+        salesTaxPct: c.ownsCard ? 0 : 8, // submission builder uses 8% default
+        buyShippingCost: c.ownsCard ? 0 : 5,
+        ownsCard: c.ownsCard,
+        gradeProbabilities: probs,
+        gradePrices: prices,
+        gradingCost: submissionTierObj.cost,
+        shippingCost: perCardShip,
+        sellFeePct: submissionSellFee,
+      };
+      const r = computeEV(costs);
+      return { ...c, result: r };
+    });
+
+    const totalEV = cardResults.reduce((s, c) => s + c.result.ev, 0);
+    const totalCost = cardResults.reduce((s, c) => s + c.result.totalCost + (c.result.opportunityCost || 0), 0);
+    const totalVariance = cardResults.reduce((s, c) => s + Math.pow(c.result.stdDev, 2), 0); // assumes independence
+    const totalStdDev = Math.sqrt(totalVariance);
+    const aggSharpe = totalStdDev > 0 ? totalEV / totalStdDev : 0;
+    const totalProbLossWeighted = cardResults.length > 0
+      ? cardResults.reduce((s, c) => s + c.result.probOfLoss, 0) / cardResults.length
+      : 0;
+    const aggROI = totalCost > 0 ? (totalEV / totalCost) * 100 : 0;
+
+    return {
+      cardResults,
+      totalEV,
+      totalCost,
+      totalStdDev,
+      aggSharpe,
+      avgProbLoss: totalProbLossWeighted,
+      aggROI,
+      perCardShip,
+      tier: submissionTierObj,
+    };
+  }, [submission, submissionTier, submissionShipping, submissionSellFee]);
+
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100" style={{ fontFamily: '"Söhne", "Inter", system-ui, sans-serif' }}>
       <style>{`
@@ -720,6 +1076,7 @@ export default function CardGradingEV() {
         <div className="max-w-[1400px] mx-auto px-6 flex gap-1">
           {[
             { id: "input", label: "Calculator", icon: Calculator },
+            { id: "submission", label: `Submission (${submission.length})`, icon: Package },
             { id: "watchlist", label: `Watchlist (${watchlist.length})`, icon: BarChart3 },
             { id: "guide", label: "Method", icon: Target },
           ].map(({ id, label, icon: Icon }) => (
@@ -814,7 +1171,13 @@ export default function CardGradingEV() {
                     <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">PSA Tier</div>
                     <select
                       value={tierId}
-                      onChange={(e) => setTierId(e.target.value)}
+                      onChange={(e) => {
+                        const newTier = e.target.value;
+                        setTierId(newTier);
+                        if (newTier === "valuebulk" && cardsInSubmission < 20) {
+                          setCardsInSubmission(20);
+                        }
+                      }}
                       className="w-full bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none"
                     >
                       {PSA_TIERS.map((t) => (
@@ -834,9 +1197,22 @@ export default function CardGradingEV() {
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <NumField label="Round-Trip Shipping" value={shippingCost} onChange={setShippingCost} prefix="$" hint="+ insurance" />
+                    <NumField label="Round-Trip Shipping" value={shippingCost} onChange={setShippingCost} prefix="$" hint="full batch" />
                     <NumField label="Sell Fee" value={sellFeePct} onChange={setSellFeePct} suffix="%" hint="eBay ≈13%" />
+                    <NumField label="Cards in Submission" value={cardsInSubmission} onChange={(v) => setCardsInSubmission(Math.max(1, Math.round(v)))} step="1" hint="shipping divides by this" />
+                    <div className="flex flex-col justify-end">
+                      <div className="px-3 py-2 bg-stone-900/50 border border-stone-800 rounded-sm flex justify-between text-[11px] font-mono">
+                        <span className="text-stone-500">/card ship</span>
+                        <span className="text-stone-300">${perCardShipping.toFixed(2)}</span>
+                      </div>
+                    </div>
                   </div>
+                  {tierId === "valuebulk" && cardsInSubmission < 20 && (
+                    <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
+                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
+                      <span>Value Bulk requires a 20-card minimum submission.</span>
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -929,15 +1305,24 @@ export default function CardGradingEV() {
                 </div>
               </section>
 
-              {/* Save */}
-              <button
-                onClick={saveToWatchlist}
-                disabled={!cardName.trim()}
-                className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-stone-800 disabled:text-stone-600 text-stone-950 disabled:cursor-not-allowed font-medium text-xs uppercase tracking-[0.2em] py-3 rounded-sm transition-colors flex items-center justify-center gap-2"
-              >
-                <Save size={13} />
-                Save to Watchlist
-              </button>
+              {/* Save / Add */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={saveToWatchlist}
+                  disabled={!cardName.trim()}
+                  className="bg-amber-500 hover:bg-amber-400 disabled:bg-stone-800 disabled:text-stone-600 text-stone-950 disabled:cursor-not-allowed font-medium text-xs uppercase tracking-[0.2em] py-3 rounded-sm transition-colors flex items-center justify-center gap-2"
+                >
+                  <Save size={13} />
+                  To Watchlist
+                </button>
+                <button
+                  onClick={addToSubmission}
+                  className="bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-100 font-medium text-xs uppercase tracking-[0.2em] py-3 rounded-sm transition-colors flex items-center justify-center gap-2"
+                >
+                  <Package size={13} />
+                  To Submission
+                </button>
+              </div>
             </div>
 
             {/* RIGHT: Output */}
@@ -1039,7 +1424,7 @@ export default function CardGradingEV() {
                     salesTaxPct={salesTaxPct}
                     buyShippingCost={buyShippingCost}
                     gradingCost={tier.cost}
-                    shippingCost={shippingCost}
+                    shippingCost={perCardShipping}
                     sellFeePct={sellFeePct}
                     result={result}
                     ownsCard={ownsCard}
@@ -1066,12 +1451,171 @@ export default function CardGradingEV() {
                     gradeProbabilities: probabilities,
                     gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
                     gradingCost: tier.cost,
-                    shippingCost,
+                    shippingCost: perCardShipping,
                     sellFeePct,
                   }}
                 />
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === "submission" && (
+          <div>
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-2xl font-semibold mb-1">Submission Builder</h2>
+                <p className="text-sm text-stone-500">Build a batch, see the aggregate EV and per-card breakdown. Shipping divides across all cards.</p>
+              </div>
+              {submission.length > 0 && (
+                <button
+                  onClick={clearSubmission}
+                  className="text-[10px] text-stone-500 hover:text-rose-400 uppercase tracking-[0.18em] flex items-center gap-1 mt-2"
+                >
+                  <X size={12} /> Clear All
+                </button>
+              )}
+            </div>
+
+            {/* Submission settings */}
+            <div className="border border-stone-800 rounded-sm p-4 mb-6">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium mb-3">Submission Settings</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">PSA Tier</div>
+                  <select
+                    value={submissionTier}
+                    onChange={(e) => updateSubmissionSetting("tier", e.target.value)}
+                    className="w-full bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none"
+                  >
+                    {PSA_TIERS.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} — ${t.cost}</option>
+                    ))}
+                  </select>
+                </div>
+                <NumField
+                  label="Round-Trip Shipping (Batch)"
+                  value={submissionShipping}
+                  onChange={(v) => updateSubmissionSetting("shipping", v)}
+                  prefix="$"
+                  hint={submission.length > 0 ? `÷${submission.length} = $${submissionResults.perCardShip.toFixed(2)}/card` : "for entire batch"}
+                />
+                <NumField
+                  label="Sell Fee"
+                  value={submissionSellFee}
+                  onChange={(v) => updateSubmissionSetting("sellFee", v)}
+                  suffix="%"
+                  hint="eBay ≈13%"
+                />
+              </div>
+              {submissionTier === "valuebulk" && submission.length < 20 && submission.length > 0 && (
+                <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
+                  <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
+                  <span>Value Bulk requires 20+ cards. You have {submission.length}.</span>
+                </div>
+              )}
+            </div>
+
+            {submission.length === 0 ? (
+              <div className="border border-dashed border-stone-800 rounded-sm py-16 text-center">
+                <Package className="mx-auto text-stone-700 mb-3" size={32} />
+                <div className="text-stone-500 text-sm">No cards in this submission yet.</div>
+                <div className="text-stone-600 text-xs mt-1">Use the Calculator tab, then click "To Submission" to add cards here.</div>
+              </div>
+            ) : (
+              <>
+                {/* Aggregate stats */}
+                <div className="border border-stone-800 rounded-sm p-6 mb-6 bg-gradient-to-br from-stone-900/40 to-stone-950">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-medium mb-4">Batch Totals · {submission.length} cards</div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <StatBlock
+                      label="Total Expected Value"
+                      value={fmt$(submissionResults.totalEV)}
+                      sublabel={fmt$Full(submissionResults.totalEV)}
+                      tone={submissionResults.totalEV > 0 ? "positive" : "negative"}
+                      large
+                    />
+                    <StatBlock
+                      label="Batch ROI"
+                      value={fmtPct(submissionResults.aggROI)}
+                      sublabel={`Cost ${fmt$(submissionResults.totalCost)}`}
+                      tone={submissionResults.aggROI > 0 ? "positive" : "negative"}
+                      large
+                    />
+                    <StatBlock
+                      label="Aggregate Sharpe"
+                      value={submissionResults.aggSharpe.toFixed(2)}
+                      sublabel="risk-adjusted"
+                      tone={submissionResults.aggSharpe > 0.7 ? "positive" : submissionResults.aggSharpe > 0.3 ? "warning" : "negative"}
+                      large
+                    />
+                    <StatBlock
+                      label="Avg P(Loss)"
+                      value={fmtPct(submissionResults.avgProbLoss * 100)}
+                      sublabel="per card avg"
+                      tone={submissionResults.avgProbLoss > 0.5 ? "negative" : submissionResults.avgProbLoss > 0.3 ? "warning" : "positive"}
+                      large
+                    />
+                  </div>
+                </div>
+
+                {/* Per-card breakdown */}
+                <div className="border border-stone-800 rounded-sm overflow-hidden">
+                  <div className="grid grid-cols-[44px_2fr_repeat(4,1fr)_40px] gap-3 px-4 py-3 bg-stone-900 text-[10px] uppercase tracking-[0.15em] text-stone-500 font-medium">
+                    <div></div>
+                    <div>Card</div>
+                    <div className="text-right">Raw $</div>
+                    <div className="text-right">EV</div>
+                    <div className="text-right">ROI</div>
+                    <div className="text-right">Verdict</div>
+                    <div></div>
+                  </div>
+                  {[...submissionResults.cardResults]
+                    .sort((a, b) => (b.result.sharpe || 0) - (a.result.sharpe || 0))
+                    .map((c) => {
+                      const isDrag = c.result.ev < 0;
+                      return (
+                        <div key={c.id} className={`grid grid-cols-[44px_2fr_repeat(4,1fr)_40px] gap-3 px-4 py-3 border-t border-stone-800 hover:bg-stone-900/50 transition-colors items-center text-sm ${isDrag ? "bg-rose-950/10" : ""}`}>
+                          {c.image ? (
+                            <img src={c.image} alt="" className="w-10 h-14 object-cover bg-stone-800 border border-stone-700 rounded-sm" />
+                          ) : (
+                            <div className="w-10 h-14 bg-stone-900 border border-stone-800 rounded-sm" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-stone-100 font-medium truncate">{c.name}</div>
+                            <div className="text-[10px] text-stone-500 font-mono">
+                              {c.ownsCard ? "Already own" : "Buying"} · P(10) {c.pPSA10.toFixed(0)}%
+                            </div>
+                          </div>
+                          <div className="text-right font-mono text-stone-300">{fmt$Full(c.rawCost)}</div>
+                          <div className={`text-right font-mono ${c.result.ev > 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmt$Full(c.result.ev)}</div>
+                          <div className={`text-right font-mono ${c.result.roi_pct > 0 || c.result.roi > 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmtPct(c.result.roi)}</div>
+                          <div className={`text-right text-[10px] font-mono uppercase tracking-wider ${
+                            c.result.verdict === "STRONG_BUY" ? "text-emerald-300" :
+                            c.result.verdict === "FAVORABLE" ? "text-emerald-400" :
+                            c.result.verdict === "MARGINAL" ? "text-stone-300" :
+                            c.result.verdict === "HIGH_RISK" ? "text-amber-400" :
+                            "text-rose-400"
+                          }`}>{c.result.verdict.replace("_", " ")}</div>
+                          <button
+                            onClick={() => removeFromSubmission(c.id)}
+                            className="text-stone-600 hover:text-rose-400 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* Hint about drags */}
+                {submissionResults.cardResults.some((c) => c.result.ev < 0) && (
+                  <div className="mt-4 px-4 py-3 bg-rose-950/20 border border-rose-900/40 rounded-sm text-[11px] text-rose-300/80 leading-relaxed">
+                    Cards highlighted in red are <strong>dragging down the batch</strong> (negative EV). Removing them improves total expected return.
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 

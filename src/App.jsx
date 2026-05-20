@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { TrendingUp, TrendingDown, AlertTriangle, Plus, Trash2, Save, BarChart3, Calculator, Target, Activity, ChevronRight, Sparkles, Package, X } from "lucide-react";
+import { TrendingUp, TrendingDown, AlertTriangle, Plus, Trash2, Save, BarChart3, Calculator, Target, Activity, ChevronRight, Sparkles, Package, X, Radar, Search, RefreshCw, Loader2 } from "lucide-react";
 
 // ===== PSA grading tiers (Feb 2026 pricing, current as of writing) =====
 const PSA_TIERS = [
@@ -856,6 +856,15 @@ export default function CardGradingEV() {
   const [submissionShipping, setSubmissionShipping] = useState(15);
   const [submissionSellFee, setSubmissionSellFee] = useState(13);
 
+  // Scanner state
+  const [scanResults, setScanResults] = useState([]);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState(null);
+  const [scanFilter, setScanFilter] = useState("all"); // all, basketball, football
+  const [scanLastUpdated, setScanLastUpdated] = useState(null);
+  const [customQuery, setCustomQuery] = useState("");
+  const [customScanLoading, setCustomScanLoading] = useState(false);
+
   // Load watchlist from browser localStorage
   useEffect(() => {
     try {
@@ -870,8 +879,78 @@ export default function CardGradingEV() {
         if (s.shipping !== undefined) setSubmissionShipping(s.shipping);
         if (s.sellFee !== undefined) setSubmissionSellFee(s.sellFee);
       }
+      const cachedScan = localStorage.getItem("scanResults");
+      if (cachedScan) {
+        const c = JSON.parse(cachedScan);
+        if (c.results) setScanResults(c.results);
+        if (c.scannedAt) setScanLastUpdated(c.scannedAt);
+      }
     } catch (e) {}
   }, []);
+
+  // --- Scanner functions ---
+  const runScan = async () => {
+    setScanLoading(true);
+    setScanError(null);
+    try {
+      const sportParam = scanFilter !== "all" ? `?sport=${scanFilter}` : "";
+      const resp = await fetch(`/api/scan${sportParam}`);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error || `Scanner returned ${resp.status}`);
+      }
+      const data = await resp.json();
+      setScanResults(data.results || []);
+      setScanLastUpdated(data.scannedAt);
+      try {
+        localStorage.setItem("scanResults", JSON.stringify(data));
+      } catch (e) {}
+    } catch (err) {
+      setScanError(err.message);
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const scanCustomCard = async () => {
+    if (!customQuery.trim()) return;
+    setCustomScanLoading(true);
+    setScanError(null);
+    try {
+      const resp = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: customQuery.trim() }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error || `Scanner returned ${resp.status}`);
+      }
+      const data = await resp.json();
+      // Prepend the custom card result to existing results
+      if (data.result) {
+        const updated = [data.result, ...scanResults];
+        setScanResults(updated);
+        try {
+          localStorage.setItem("scanResults", JSON.stringify({ results: updated, scannedAt: new Date().toISOString() }));
+        } catch (e) {}
+      }
+      setCustomQuery("");
+    } catch (err) {
+      setScanError(err.message);
+    } finally {
+      setCustomScanLoading(false);
+    }
+  };
+
+  // Load a scanner result into the calculator for deeper review
+  const loadIntoCalculator = (result) => {
+    setCardName(`${result.year || ""} ${result.set || ""} ${result.player || ""}`.trim());
+    setRawCost(result.prices?.raw?.median || 50);
+    setPricePSA10(result.prices?.psa10?.median || 400);
+    setPricePSA9(result.prices?.psa9?.median || 120);
+    setActiveTab("input");
+  };
 
   const tier = PSA_TIERS.find((t) => t.id === tierId) || PSA_TIERS[1];
 
@@ -1076,6 +1155,7 @@ export default function CardGradingEV() {
         <div className="max-w-[1400px] mx-auto px-6 flex gap-1">
           {[
             { id: "input", label: "Calculator", icon: Calculator },
+            { id: "scanner", label: "Scanner", icon: Radar },
             { id: "submission", label: `Submission (${submission.length})`, icon: Package },
             { id: "watchlist", label: `Watchlist (${watchlist.length})`, icon: BarChart3 },
             { id: "guide", label: "Method", icon: Target },
@@ -1456,6 +1536,168 @@ export default function CardGradingEV() {
                   }}
                 />
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "scanner" && (
+          <div>
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-2xl font-semibold mb-1">Scanner</h2>
+                <p className="text-sm text-stone-500">Scan modern basketball &amp; football rookies and rank by expected return. Results are estimates — verify against 130point before grading.</p>
+              </div>
+              <button
+                onClick={runScan}
+                disabled={scanLoading}
+                className="bg-amber-500 hover:bg-amber-400 disabled:bg-stone-800 disabled:text-stone-600 text-stone-950 disabled:cursor-not-allowed font-medium text-xs uppercase tracking-[0.2em] py-2.5 px-4 rounded-sm transition-colors flex items-center gap-2"
+              >
+                {scanLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                {scanLoading ? "Scanning..." : (scanResults.length > 0 ? "Rescan" : "Run Scan")}
+              </button>
+            </div>
+
+            {/* Filters and custom card */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              {/* Sport filter */}
+              <div className="border border-stone-800 rounded-sm p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium mb-2">Filter</div>
+                <div className="flex gap-1 bg-stone-900 p-1 rounded-sm border border-stone-800">
+                  {[
+                    { id: "all", label: "All" },
+                    { id: "basketball", label: "Basketball" },
+                    { id: "football", label: "Football" },
+                  ].map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => setScanFilter(id)}
+                      className={`flex-1 py-1.5 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
+                        scanFilter === id ? "bg-stone-800 text-amber-400" : "text-stone-500 hover:text-stone-300"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 text-[10px] text-stone-500 italic leading-relaxed">
+                  Click "Run Scan" above to fetch current eBay prices for cards in this category.
+                </div>
+              </div>
+
+              {/* Custom card scan */}
+              <div className="border border-stone-800 rounded-sm p-4">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium mb-2">Add Custom Card</div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={customQuery}
+                    onChange={(e) => setCustomQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && scanCustomCard()}
+                    placeholder="e.g. 2023 Prizm CJ Stroud 339"
+                    className="flex-1 bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none placeholder:text-stone-600"
+                  />
+                  <button
+                    onClick={scanCustomCard}
+                    disabled={customScanLoading || !customQuery.trim()}
+                    className="bg-stone-800 hover:bg-stone-700 disabled:bg-stone-900 disabled:text-stone-600 border border-stone-700 text-stone-100 text-xs uppercase tracking-wider px-3 rounded-sm flex items-center gap-2"
+                  >
+                    {customScanLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                    Scan
+                  </button>
+                </div>
+                <div className="mt-3 text-[10px] text-stone-500 italic leading-relaxed">
+                  Type a card description and we'll add it to your results.
+                </div>
+              </div>
+            </div>
+
+            {/* Error state */}
+            {scanError && (
+              <div className="mb-6 px-4 py-3 bg-rose-950/30 border border-rose-900/40 rounded-sm text-[11px] text-rose-300 leading-relaxed">
+                <div className="font-medium mb-1">Scanner error</div>
+                <div className="font-mono text-[10px] opacity-80">{scanError}</div>
+              </div>
+            )}
+
+            {/* Status bar */}
+            {scanLastUpdated && (
+              <div className="mb-4 flex items-center justify-between text-[10px] text-stone-500 font-mono">
+                <span>Last scan: {new Date(scanLastUpdated).toLocaleString()}</span>
+                <span>{scanResults.filter((r) => r.status === "ok").length} valid · {scanResults.filter((r) => r.status !== "ok").length} skipped</span>
+              </div>
+            )}
+
+            {/* Results table */}
+            {scanResults.length === 0 ? (
+              <div className="border border-dashed border-stone-800 rounded-sm py-16 text-center">
+                <Radar className="mx-auto text-stone-700 mb-3" size={32} />
+                <div className="text-stone-500 text-sm">No scan results yet.</div>
+                <div className="text-stone-600 text-xs mt-1">Click "Run Scan" above to fetch current eBay prices.</div>
+              </div>
+            ) : (
+              <div className="border border-stone-800 rounded-sm overflow-hidden">
+                <div className="grid grid-cols-[2fr_repeat(6,1fr)_60px] gap-3 px-4 py-2 bg-stone-900 text-[10px] uppercase tracking-[0.15em] text-stone-500 font-medium">
+                  <div>Card</div>
+                  <div className="text-right">Raw $</div>
+                  <div className="text-right">PSA 9 $</div>
+                  <div className="text-right">PSA 10 $</div>
+                  <div className="text-right">EV</div>
+                  <div className="text-right">Sharpe</div>
+                  <div className="text-right">Verdict</div>
+                  <div></div>
+                </div>
+                {[...scanResults]
+                  .filter((r) => r.status === "ok")
+                  .sort((a, b) => (b.sharpe || 0) - (a.sharpe || 0))
+                  .map((r) => (
+                    <div key={r.id} className="grid grid-cols-[2fr_repeat(6,1fr)_60px] gap-3 px-4 py-2.5 border-t border-stone-800 hover:bg-stone-900/50 transition-colors items-center text-sm">
+                      <div className="min-w-0">
+                        <div className="text-stone-100 font-medium truncate">{r.player}</div>
+                        <div className="text-[10px] text-stone-500 font-mono">{r.year} {r.set} {r.cardNumber && `#${r.cardNumber}`} · {r.sport}</div>
+                      </div>
+                      <div className="text-right font-mono text-stone-300">${r.prices?.raw?.median?.toFixed(0) || "—"}</div>
+                      <div className="text-right font-mono text-stone-300">${r.prices?.psa9?.median?.toFixed(0) || "—"}</div>
+                      <div className="text-right font-mono text-stone-300">${r.prices?.psa10?.median?.toFixed(0) || "—"}</div>
+                      <div className={`text-right font-mono ${r.ev > 0 ? "text-emerald-400" : "text-rose-400"}`}>{r.ev > 0 ? "+" : ""}${r.ev?.toFixed(0)}</div>
+                      <div className={`text-right font-mono ${r.sharpe > 0.7 ? "text-emerald-400" : r.sharpe > 0.3 ? "text-amber-400" : "text-rose-400"}`}>{r.sharpe?.toFixed(2)}</div>
+                      <div className={`text-right text-[10px] font-mono uppercase tracking-wider ${
+                        r.verdict === "STRONG_BUY" ? "text-emerald-300" :
+                        r.verdict === "FAVORABLE" ? "text-emerald-400" :
+                        r.verdict === "MARGINAL" ? "text-stone-300" :
+                        r.verdict === "HIGH_RISK" ? "text-amber-400" :
+                        "text-rose-400"
+                      }`}>{r.verdict?.replace("_", " ")}</div>
+                      <button
+                        onClick={() => loadIntoCalculator(r)}
+                        className="text-stone-600 hover:text-amber-400 text-[10px] uppercase tracking-wider transition-colors"
+                        title="Load into calculator"
+                      >
+                        Open →
+                      </button>
+                    </div>
+                  ))}
+                {/* Skipped cards section */}
+                {scanResults.some((r) => r.status !== "ok") && (
+                  <div className="border-t-2 border-stone-700">
+                    <div className="px-4 py-2 bg-stone-900/50 text-[10px] uppercase tracking-[0.15em] text-stone-500 font-medium">
+                      Skipped ({scanResults.filter((r) => r.status !== "ok").length})
+                    </div>
+                    {scanResults.filter((r) => r.status !== "ok").map((r) => (
+                      <div key={r.id} className="grid grid-cols-[2fr_2fr] gap-3 px-4 py-2 border-t border-stone-800 text-xs">
+                        <div className="text-stone-400 truncate">{r.player} <span className="text-[10px] text-stone-600">({r.year} {r.set})</span></div>
+                        <div className="text-[10px] text-stone-500 italic truncate">{r.note}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Notes */}
+            <div className="mt-6 px-4 py-3 bg-stone-900/30 border border-stone-800 rounded-sm text-[11px] text-stone-400 leading-relaxed">
+              <div className="font-medium text-stone-300 mb-1">How the scanner works</div>
+              <p className="mb-1">For each card, the scanner pulls current eBay listings for raw, PSA 9, and PSA 10 versions. Median prices are discounted ~18% to estimate sold prices (active listings tend to be priced higher than actuals).</p>
+              <p>EV uses default probabilities (P10: 18%, P9: 55%, P8: 22%, lower: 5%). For accurate per-card analysis, click "Open →" to load the card into the Calculator and refine pop data and tier.</p>
             </div>
           </div>
         )}

@@ -301,14 +301,16 @@ function EmptyState({ icon: Icon, title, description, action }) {
 }
 
 function Logo() {
+  // Generic graded-card slab: clear case, label strip, card window
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="8" y="2" width="12" height="16" rx="2.5" className="fill-ink/30" />
-      <rect x="4" y="6" width="12" height="16" rx="2.5" className="fill-ink" />
+      <rect x="4.75" y="1.75" width="14.5" height="20.5" rx="2.5" fill="none" className="stroke-ink" strokeWidth="1.5" />
+      <rect x="7" y="4" width="10" height="4" rx="1" className="fill-accent" />
+      <rect x="7" y="9.5" width="10" height="10.25" rx="1" className="fill-ink/25" />
+      <rect x="8.5" y="11" width="7" height="7.25" rx="0.5" className="fill-ink/40" />
     </svg>
   );
 }
-
 function ThemeToggle() {
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem("theme") || "dark"; } catch (e) { return "dark"; }

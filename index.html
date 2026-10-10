@@ -3,8 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cardstack — Grading EV Terminal</title>
+    <title>Cardstack — Grading EV calculator</title>
     <meta name="description" content="Risk-adjusted expected value calculator for sports card grading decisions." />
+    <meta name="theme-color" content="#09090b" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='8' y='2' width='12' height='16' rx='2.5' fill='%2371717a' opacity='.3'/%3E%3Crect x='4' y='6' width='12' height='16' rx='2.5' fill='%2371717a'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      // Apply saved theme before first paint so there's no flash.
+      try {
+        var t = localStorage.getItem('theme') || 'dark';
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    </script>
   </head>
   <body>
     <div id="root"></div>

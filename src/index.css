@@ -2,9 +2,84 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===== Design tokens (R G B) ===== */
+:root {
+  --bg: 250 250 250;
+  --surface: 255 255 255;
+  --subtle: 244 244 245;
+  --line: 228 228 231;
+  --line-strong: 212 212 216;
+  --ink: 9 9 11;
+  --ink-2: 63 63 70;
+  --muted: 113 113 122;
+  --faint: 161 161 170;
+  --accent: 94 86 240;
+  --pos: 21 128 61;
+  --neg: 220 38 38;
+  --warn: 180 83 9;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 9 9 11;
+    --surface: 19 19 22;
+    --subtle: 29 29 33;
+    --line: 39 39 44;
+    --line-strong: 58 58 64;
+    --ink: 244 244 245;
+    --ink-2: 212 212 216;
+    --muted: 145 145 155;
+    --faint: 100 100 110;
+    --accent: 139 133 255;
+    --pos: 74 222 128;
+    --neg: 248 113 113;
+    --warn: 251 191 36;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: 9 9 11;
+  --surface: 19 19 22;
+  --subtle: 29 29 33;
+  --line: 39 39 44;
+  --line-strong: 58 58 64;
+  --ink: 244 244 245;
+  --ink-2: 212 212 216;
+  --muted: 145 145 155;
+  --faint: 100 100 110;
+  --accent: 139 133 255;
+  --pos: 74 222 128;
+  --neg: 248 113 113;
+  --warn: 251 191 36;
+  color-scheme: dark;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
 html, body, #root {
   margin: 0;
   padding: 0;
-  background: #0c0a09;
   min-height: 100vh;
 }
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--ink));
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection { background: rgb(var(--accent) / 0.2); }
+
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

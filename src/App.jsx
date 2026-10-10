@@ -1,16 +1,14 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { TrendingUp, TrendingDown, AlertTriangle, Plus, Trash2, Save, BarChart3, Calculator, Target, Activity, ChevronRight, Sparkles, Package, X, Radar, Search, RefreshCw, Loader2 } from "lucide-react";
+import { AlertTriangle, Trash2, Package, X, Search, RefreshCw, Loader2, Sun, Moon, Monitor, ChevronDown, ImagePlus, ArrowUpRight, Check, Bookmark, Radar, BarChart3, Info } from "lucide-react";
 
-// ===== PSA grading tiers (Feb 2026 pricing, current as of writing) =====
+// ===== PSA grading tiers (Oct 2026 pricing) =====
+// maxValue = PSA's max insured value for the tier
 const PSA_TIERS = [
-  { id: "valuebulk", name: "Value Bulk",    cost: 24.99, maxValue: 500,   turnaround: "140-160 business days", note: "Collectors Club only, 20+ card minimum" },
-  { id: "value",     name: "Value",         cost: 32.99, maxValue: 500,   turnaround: "75 business days" },
-  { id: "valueplus", name: "Value Plus",    cost: 49.99, maxValue: 1000,  turnaround: "45 business days" },
-  { id: "valuemax",  name: "Value Max",     cost: 64.99, maxValue: 2500,  turnaround: "35 business days" },
-  { id: "regular",   name: "Regular",       cost: 79.99, maxValue: 5000,  turnaround: "25 business days" },
-  { id: "express",   name: "Express",       cost: 149,   maxValue: 10000, turnaround: "15 business days" },
-  { id: "superexp",  name: "Super Express", cost: 349,   maxValue: 25000, turnaround: "7 business days" },
-  { id: "walkthru",  name: "Walk-Through",  cost: 350,   maxValue: 50000, turnaround: "5 business days", note: "scales with declared value" },
+  { id: "standard",  name: "Standard",      cost: 59.99, maxValue: 1000,  turnaround: "90–100 business days" },
+  { id: "priority",  name: "Priority",      cost: 79.99, maxValue: 1500,  turnaround: "70–80 business days", note: "Returned in a fitted sleeve" },
+  { id: "express",   name: "Express",       cost: 199,   maxValue: 2500,  turnaround: "20–30 business days", note: "Includes grader notes" },
+  { id: "superexp",  name: "Super Express", cost: 349,   maxValue: 5000,  turnaround: "10–15 business days" },
+  { id: "premier",   name: "Premier",       cost: 599,   maxValue: 10000, turnaround: "7–10 business days" },
 ];
 
 // ===== Core calculation engine =====
@@ -110,7 +108,262 @@ const fmt$Full = (n) => {
 };
 const fmtPct = (n) => (n === null || n === undefined || isNaN(n) ? "—" : `${n.toFixed(1)}%`);
 
-// ===== Components =====
+const fmtSigned$ = (n) => {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  return `${n > 0 ? "+" : ""}${fmt$Full(n)}`;
+};
+
+// CSS-variable color helper for inline styles / SVG: col("pos", 0.4)
+const col = (token, a = 1) => `rgb(var(--${token}) / ${a})`;
+
+// ===== Design system =====
+
+const VERDICTS = {
+  STRONG_BUY: { label: "Strong buy", tone: "pos",     blurb: "Exceptional risk/reward. Stress-test your inputs before scaling in." },
+  FAVORABLE:  { label: "Favorable",  tone: "pos",     blurb: "Solid risk-adjusted return. Worth a position." },
+  MARGINAL:   { label: "Marginal",   tone: "neutral", blurb: "Reasonable bet, but the edge is thin. Double-check your comps." },
+  HIGH_RISK:  { label: "High risk",  tone: "warn",    blurb: "Positive EV, but volatile. Only worth it if you can absorb the swings." },
+  AVOID:      { label: "Avoid",      tone: "neg",     blurb: "Negative expected value. The math says don't grade this one." },
+};
+
+const TONE_TEXT = { pos: "text-pos", neg: "text-neg", warn: "text-warn", neutral: "text-ink" };
+const TONE_PILL = {
+  pos: "bg-pos/10 text-pos",
+  neg: "bg-neg/10 text-neg",
+  warn: "bg-warn/10 text-warn",
+  neutral: "bg-subtle text-ink-2",
+};
+const TONE_DOT = { pos: "bg-pos", neg: "bg-neg", warn: "bg-warn", neutral: "bg-faint" };
+
+const sharpeTone = (s) => (s > 0.7 ? "pos" : s > 0.3 ? "warn" : "neg");
+const signTone = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neutral");
+
+const inputCls =
+  "w-full h-9 rounded-lg bg-surface border border-line text-ink text-[14px] tabular-nums placeholder:text-faint " +
+  "transition-[border-color,box-shadow] hover:border-line-strong focus:outline-none focus:border-accent focus:ring-[3px] focus:ring-accent/15";
+
+function Button({ variant = "primary", size = "md", className = "", children, ...props }) {
+  const base =
+    "inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap transition-all " +
+    "disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/25 enabled:active:scale-[0.98]";
+  const sizes = { sm: "h-8 px-3 text-[13px]", md: "h-9 px-4 text-[14px]" };
+  const variants = {
+    primary: "bg-ink text-bg enabled:hover:bg-ink/85 shadow-sm",
+    secondary: "bg-surface text-ink border border-line enabled:hover:bg-subtle enabled:hover:border-line-strong shadow-card",
+    ghost: "text-muted enabled:hover:text-ink enabled:hover:bg-subtle",
+    danger: "text-muted enabled:hover:text-neg enabled:hover:bg-neg/10",
+  };
+  return (
+    <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} {...props}>
+      {children}
+    </button>
+  );
+}
+
+function IconButton({ label, className = "", children, ...props }) {
+  return (
+    <button
+      aria-label={label}
+      title={label}
+      className={`h-8 w-8 grid place-items-center rounded-lg text-faint hover:text-ink hover:bg-subtle transition-colors ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ className = "", children }) {
+  return <div className={`bg-surface border border-line rounded-xl shadow-card ${className}`}>{children}</div>;
+}
+
+function CardHeader({ title, subtitle, right }) {
+  return (
+    <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
+      <div className="min-w-0">
+        <h3 className="text-[15px] font-semibold text-ink tracking-[-0.01em]">{title}</h3>
+        {subtitle && <p className="text-[13px] text-muted mt-0.5">{subtitle}</p>}
+      </div>
+      {right && <div className="shrink-0">{right}</div>}
+    </div>
+  );
+}
+
+function Pill({ tone = "neutral", children, dot = false, className = "" }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[12px] font-medium tabular-nums whitespace-nowrap ${TONE_PILL[tone]} ${className}`}>
+      {dot && <span className={`w-1.5 h-1.5 rounded-full ${TONE_DOT[tone]}`} />}
+      {children}
+    </span>
+  );
+}
+
+function VerdictPill({ code }) {
+  const v = VERDICTS[code] || VERDICTS.MARGINAL;
+  return <Pill tone={v.tone} dot>{v.label}</Pill>;
+}
+
+function Label({ children, hint }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2 mb-1.5">
+      <span className="text-[13px] font-medium text-ink-2">{children}</span>
+      {hint && <span className="text-[12px] text-faint truncate">{hint}</span>}
+    </div>
+  );
+}
+
+function Callout({ tone = "neutral", children }) {
+  const cls = {
+    neutral: "bg-subtle text-ink-2",
+    warn: "bg-warn/10 text-warn",
+    neg: "bg-neg/10 text-neg",
+  }[tone];
+  const Icon = tone === "neutral" ? Info : AlertTriangle;
+  return (
+    <div className={`flex gap-2.5 rounded-lg px-3 py-2.5 text-[13px] leading-snug ${cls}`}>
+      <Icon size={14} className="mt-[2px] shrink-0 opacity-80" />
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, tone }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-subtle px-3 h-9 text-[13px]">
+      <span className="text-muted">{label}</span>
+      <span className={`font-medium tabular-nums ${tone ? TONE_TEXT[tone] : "text-ink"}`}>{value}</span>
+    </div>
+  );
+}
+
+function Segmented({ options, value, onChange }) {
+  return (
+    <div className="flex w-full p-0.5 rounded-lg bg-subtle border border-line">
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          onClick={() => onChange(o.value)}
+          className={`flex-1 h-8 px-3 rounded-md text-[13px] font-medium whitespace-nowrap transition-all ${
+            value === o.value ? "bg-surface text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Select({ value, onChange, children }) {
+  return (
+    <div className="relative">
+      <select value={value} onChange={onChange} className={`${inputCls} appearance-none pl-3 pr-9 cursor-pointer`}>
+        {children}
+      </select>
+      <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-faint" />
+    </div>
+  );
+}
+
+function Stat({ label, value, sub, tone = "neutral" }) {
+  return (
+    <div className="bg-surface px-5 py-4">
+      <div className="text-[13px] text-muted">{label}</div>
+      <div className={`mt-1 text-[22px] font-semibold tracking-[-0.02em] tabular-nums ${TONE_TEXT[tone]}`}>{value}</div>
+      {sub && <div className="mt-0.5 text-[12px] text-faint tabular-nums">{sub}</div>}
+    </div>
+  );
+}
+
+function PageHeader({ title, description, actions }) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+      <div>
+        <h1 className="text-[28px] sm:text-[32px] font-semibold tracking-[-0.03em] text-ink leading-tight">{title}</h1>
+        {description && <p className="mt-2 text-[15px] text-muted max-w-2xl leading-relaxed">{description}</p>}
+      </div>
+      {actions && <div className="flex gap-2 shrink-0">{actions}</div>}
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, title, description, action }) {
+  return (
+    <Card className="py-16 px-6 text-center">
+      <div className="mx-auto w-11 h-11 rounded-full bg-subtle grid place-items-center text-muted mb-4">
+        <Icon size={18} />
+      </div>
+      <div className="text-[15px] font-medium text-ink">{title}</div>
+      <div className="text-[14px] text-muted mt-1 max-w-sm mx-auto">{description}</div>
+      {action && <div className="mt-5">{action}</div>}
+    </Card>
+  );
+}
+
+function Logo() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="8" y="2" width="12" height="16" rx="2.5" className="fill-ink/30" />
+      <rect x="4" y="6" width="12" height="16" rx="2.5" className="fill-ink" />
+    </svg>
+  );
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem("theme") || "dark"; } catch (e) { return "dark"; }
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", theme);
+    try { localStorage.setItem("theme", theme); } catch (e) {}
+  }, [theme]);
+  const next = { dark: "light", light: "system", system: "dark" }[theme];
+  const Icon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
+  return (
+    <IconButton label={`Theme: ${theme} (switch to ${next})`} onClick={() => setTheme(next)}>
+      <Icon size={16} />
+    </IconButton>
+  );
+}
+
+// Table primitives — horizontally scrollable on small screens
+function Table({ cols, minWidth = 760, head, children }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <div style={{ minWidth }}>
+          <div className="grid gap-4 px-5 h-10 items-center border-b border-line bg-subtle/50 text-[12px] font-medium text-muted" style={{ gridTemplateColumns: cols }}>
+            {head}
+          </div>
+          {children}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function Row({ cols, className = "", children }) {
+  return (
+    <div
+      className={`grid gap-4 px-5 py-3 items-center border-b border-line last:border-b-0 hover:bg-subtle/50 transition-colors text-[14px] ${className}`}
+      style={{ gridTemplateColumns: cols }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Thumb({ src }) {
+  return src ? (
+    <img src={src} alt="" className="w-9 h-12 object-cover rounded-md ring-1 ring-line bg-subtle shrink-0" />
+  ) : (
+    <div className="w-9 h-12 rounded-md bg-subtle ring-1 ring-line shrink-0" />
+  );
+}
+
+// ===== Form fields =====
 
 function NumField({ label, value, onChange, prefix, suffix, step = "any", hint }) {
   // Local string state lets us show empty while typing, instead of forcing "0"
@@ -126,38 +379,34 @@ function NumField({ label, value, onChange, prefix, suffix, step = "any", hint }
   const handleChange = (e) => {
     const raw = e.target.value;
     setLocalValue(raw);
-    // Only fire onChange when it parses to a valid number
     const parsed = parseFloat(raw);
     if (!isNaN(parsed)) onChange(parsed);
     else if (raw === "" || raw === "-") onChange(0);
   };
 
   const handleBlur = () => {
-    // On blur, normalize the display
     const parsed = parseFloat(localValue);
     if (isNaN(parsed)) setLocalValue("0");
     else setLocalValue(String(parsed));
   };
 
   return (
-    <label className="block">
-      <div className="flex items-baseline justify-between mb-1.5">
-        <span className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium">{label}</span>
-        {hint && <span className="text-[9px] text-stone-500 italic">{hint}</span>}
-      </div>
+    <label className="block min-w-0">
+      <Label hint={hint}>{label}</Label>
       <div className="relative">
-        {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500 text-sm font-mono">{prefix}</span>}
+        {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint text-[14px]">{prefix}</span>}
         <input
           type="number"
+          inputMode="decimal"
           step={step}
           value={localValue}
           data-numfield-id={label}
           onFocus={(e) => e.target.select()}
           onChange={handleChange}
           onBlur={handleBlur}
-          className={`w-full bg-stone-900 border border-stone-700 text-stone-100 font-mono text-sm py-2 ${prefix ? "pl-6" : "pl-3"} ${suffix ? "pr-8" : "pr-3"} rounded-sm focus:border-amber-500 focus:outline-none transition-colors`}
+          className={`${inputCls} ${prefix ? "pl-6" : "pl-3"} ${suffix ? "pr-8" : "pr-3"}`}
         />
-        {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 text-sm font-mono">{suffix}</span>}
+        {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-faint text-[14px]">{suffix}</span>}
       </div>
     </label>
   );
@@ -166,23 +415,23 @@ function NumField({ label, value, onChange, prefix, suffix, step = "any", hint }
 function TextField({ label, value, onChange, placeholder }) {
   return (
     <label className="block">
-      <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">{label}</div>
+      <Label>{label}</Label>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none transition-colors placeholder:text-stone-600"
+        className={`${inputCls} px-3`}
       />
     </label>
   );
 }
 
 // Card image: supports drag-drop upload, file picker, paste URL.
-// Stores as data URL (from upload) or http URL (from paste).
 function CardImageInput({ value, onChange }) {
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState("");
+  const [dragging, setDragging] = useState(false);
   const fileInputRef = React.useRef(null);
 
   const handleFile = (file) => {
@@ -199,6 +448,7 @@ function CardImageInput({ value, onChange }) {
 
   const handleDrop = (e) => {
     e.preventDefault();
+    setDragging(false);
     handleFile(e.dataTransfer.files?.[0]);
   };
 
@@ -212,54 +462,50 @@ function CardImageInput({ value, onChange }) {
 
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">Card Image</div>
+      <Label>Image <span className="text-faint font-normal">(optional)</span></Label>
       {value ? (
-        <div className="relative group">
-          <img src={value} alt="Card" className="w-full h-48 object-contain bg-stone-900 border border-stone-700 rounded-sm" />
-          <button
-            onClick={() => onChange("")}
-            className="absolute top-2 right-2 bg-stone-950/80 hover:bg-rose-950 text-stone-300 hover:text-rose-300 border border-stone-700 rounded-sm px-2 py-1 text-[10px] uppercase tracking-wider transition-colors"
-          >
+        <div className="relative rounded-lg bg-subtle ring-1 ring-line p-3 flex justify-center">
+          <img src={value} alt="Card" className="h-44 object-contain rounded-md" />
+          <Button variant="secondary" size="sm" className="absolute top-2 right-2" onClick={() => onChange("")}>
             Remove
-          </button>
+          </Button>
         </div>
       ) : urlMode ? (
         <div className="flex gap-2">
           <input
             type="text"
             value={urlInput}
+            autoFocus
             onChange={(e) => setUrlInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handlePaste()}
-            placeholder="Paste image URL..."
-            className="flex-1 bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none placeholder:text-stone-600"
+            placeholder="https://…"
+            className={`${inputCls} px-3 flex-1`}
           />
-          <button
-            onClick={handlePaste}
-            className="bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs uppercase tracking-wider px-3 rounded-sm font-medium"
-          >
-            Add
-          </button>
-          <button
-            onClick={() => { setUrlMode(false); setUrlInput(""); }}
-            className="text-stone-500 hover:text-stone-300 text-xs px-2"
-          >
-            ✕
-          </button>
+          <Button size="md" onClick={handlePaste}>Add</Button>
+          <IconButton label="Cancel" className="h-9 w-9" onClick={() => { setUrlMode(false); setUrlInput(""); }}>
+            <X size={15} />
+          </IconButton>
         </div>
       ) : (
         <div
-          onDragOver={(e) => e.preventDefault()}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-stone-700 hover:border-amber-500 bg-stone-900/50 rounded-sm py-8 px-4 text-center cursor-pointer transition-colors"
+          className={`rounded-lg border border-dashed py-6 px-4 text-center cursor-pointer transition-colors ${
+            dragging ? "border-accent bg-accent/5" : "border-line-strong hover:border-faint hover:bg-subtle/60"
+          }`}
         >
-          <div className="text-stone-500 text-xs mb-2">Drag image here, or click to upload</div>
+          <ImagePlus size={18} className="mx-auto text-faint mb-2" />
+          <div className="text-[13px] text-ink-2">
+            Drop an image or <span className="text-accent font-medium">browse</span>
+          </div>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setUrlMode(true); }}
-            className="text-amber-500 hover:text-amber-400 text-[10px] uppercase tracking-wider"
+            className="mt-1 text-[12px] text-muted hover:text-ink underline-offset-2 hover:underline"
           >
-            or paste a URL
+            Paste a URL instead
           </button>
           <input
             ref={fileInputRef}
@@ -274,104 +520,58 @@ function CardImageInput({ value, onChange }) {
   );
 }
 
-function StatBlock({ label, value, sublabel, tone = "neutral", large = false }) {
-  const tones = {
-    positive: "text-emerald-400 border-emerald-900/40",
-    negative: "text-rose-400 border-rose-900/40",
-    warning:  "text-amber-400 border-amber-900/40",
-    neutral:  "text-stone-100 border-stone-800",
-  };
+function FormSection({ title, description, children }) {
   return (
-    <div className={`border-l-2 pl-3 py-1 ${tones[tone]}`}>
-      <div className="text-[9px] uppercase tracking-[0.2em] text-stone-500 font-medium mb-1">{label}</div>
-      <div className={`font-mono ${large ? "text-2xl" : "text-lg"} font-semibold leading-none`}>{value}</div>
-      {sublabel && <div className="text-[10px] text-stone-500 mt-1.5 font-mono">{sublabel}</div>}
-    </div>
-  );
-}
-
-function VerdictBadge({ ev, sharpe, probOfLoss }) {
-  let label, tone, blurb;
-  if (ev <= 0) {
-    label = "AVOID";
-    tone = "rose";
-    blurb = "Negative expected value. The math says don't grade.";
-  } else if (sharpe < 0.3 || probOfLoss > 0.6) {
-    label = "HIGH RISK";
-    tone = "amber";
-    blurb = "Positive EV but volatile. Only attempt if you can absorb variance.";
-  } else if (sharpe < 0.7) {
-    label = "MARGINAL";
-    tone = "stone";
-    blurb = "Reasonable bet, but edge is thin. Verify your comps.";
-  } else if (sharpe < 1.5) {
-    label = "FAVORABLE";
-    tone = "emerald";
-    blurb = "Solid risk-adjusted return. Worth a position.";
-  } else {
-    label = "STRONG BUY";
-    tone = "emerald";
-    blurb = "Exceptional risk/reward. Stress-test before scaling in.";
-  }
-  const bg = {
-    rose: "bg-rose-950/30 border-rose-800 text-rose-300",
-    amber: "bg-amber-950/30 border-amber-800 text-amber-300",
-    stone: "bg-stone-800/50 border-stone-700 text-stone-300",
-    emerald: "bg-emerald-950/30 border-emerald-800 text-emerald-300",
-  };
-  return (
-    <div className={`border ${bg[tone]} px-4 py-3 rounded-sm`}>
-      <div className="flex items-center gap-2 mb-1">
-        <Sparkles size={14} />
-        <span className="text-[11px] uppercase tracking-[0.25em] font-semibold">{label}</span>
+    <div className="px-5 py-5">
+      <div className="mb-4">
+        <h3 className="text-[14px] font-semibold text-ink tracking-[-0.01em]">{title}</h3>
+        {description && <p className="text-[13px] text-muted mt-0.5 leading-snug">{description}</p>}
       </div>
-      <div className="text-xs text-stone-300/80 font-light leading-relaxed">{blurb}</div>
+      {children}
     </div>
   );
 }
 
-// ===== Outcome distribution bar chart =====
+// ===== Charts =====
+
+const GRADE_LABELS = { psa10: "PSA 10", psa9: "PSA 9", psa8: "PSA 8", psa7orLower: "PSA ≤7" };
+
+// Diverging horizontal bar centered on zero
+function DivergingBar({ value, max }) {
+  const pct = max > 0 ? (Math.abs(value) / max) * 50 : 0;
+  const positive = value >= 0;
+  return (
+    <div className="relative h-2">
+      <div className="absolute inset-0 rounded-full bg-subtle" />
+      <div className="absolute inset-y-[-3px] left-1/2 w-px bg-line-strong" />
+      <div
+        className={`absolute inset-y-0 rounded-full ${positive ? "bg-pos/70" : "bg-neg/70"}`}
+        style={positive ? { left: "50%", width: `${pct}%` } : { right: "50%", width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
 function OutcomeChart({ outcomes }) {
-  const labels = { psa10: "PSA 10", psa9: "PSA 9", psa8: "PSA 8", psa7orLower: "PSA ≤7" };
   const max = Math.max(...outcomes.map((o) => Math.abs(o.profit)), 1);
   return (
-    <div className="bg-stone-950 border border-stone-800 rounded-sm overflow-hidden">
-      {/* Sub-header */}
-      <div className="grid grid-cols-[60px_1fr_85px_55px] gap-3 px-3 py-1.5 bg-stone-900 text-[9px] uppercase tracking-wider text-stone-500 font-mono border-b border-stone-800">
+    <div className="px-5 pb-2">
+      <div className="grid grid-cols-[64px_1fr_88px_56px] gap-4 pb-2 text-[12px] text-faint">
         <div>Grade</div>
-        <div className="text-center">P&amp;L Distribution</div>
+        <div className="text-center">Loss ← → Profit</div>
         <div className="text-right">Profit</div>
-        <div className="text-right">Prob</div>
+        <div className="text-right">Odds</div>
       </div>
-      <div className="divide-y divide-stone-900">
-        {outcomes.map((o) => {
-          const pct = max > 0 ? (Math.abs(o.profit) / max) * 100 : 0;
-          const positive = o.profit >= 0;
-          return (
-            <div key={o.grade} className="grid grid-cols-[60px_1fr_85px_55px] gap-3 items-center px-3 py-2 hover:bg-stone-900/50 transition-colors">
-              <div className="text-[11px] font-mono text-stone-300 font-medium">{labels[o.grade]}</div>
-              <div className="relative h-3.5">
-                {/* Center line */}
-                <div className="absolute inset-y-0 left-1/2 w-px bg-stone-700" />
-                {/* Bar */}
-                <div
-                  className={`absolute inset-y-0 ${positive ? "left-1/2 bg-emerald-500/70" : "right-1/2 bg-rose-500/70"}`}
-                  style={{ width: `${pct / 2}%` }}
-                />
-                {/* End cap line */}
-                <div
-                  className={`absolute inset-y-0 w-px ${positive ? "bg-emerald-300" : "bg-rose-300"}`}
-                  style={positive ? { left: `calc(50% + ${pct / 2}%)` } : { right: `calc(50% + ${pct / 2}%)` }}
-                />
-              </div>
-              <div className={`text-[11px] font-mono text-right tabular-nums ${positive ? "text-emerald-300" : "text-rose-300"}`}>
-                {positive ? "+" : ""}{o.profit.toFixed(2)}
-              </div>
-              <div className="text-[11px] font-mono text-stone-400 text-right tabular-nums">{(o.prob * 100).toFixed(1)}%</div>
-            </div>
-          );
-        })}
-      </div>
+      {outcomes.map((o) => (
+        <div key={o.grade} className="grid grid-cols-[64px_1fr_88px_56px] gap-4 items-center py-2.5 border-t border-line">
+          <div className="text-[14px] font-medium text-ink">{GRADE_LABELS[o.grade]}</div>
+          <DivergingBar value={o.profit} max={max} />
+          <div className={`text-[14px] font-medium text-right tabular-nums ${o.profit >= 0 ? "text-pos" : "text-neg"}`}>
+            {fmtSigned$(o.profit)}
+          </div>
+          <div className="text-[14px] text-muted text-right tabular-nums">{(o.prob * 100).toFixed(1)}%</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -398,84 +598,76 @@ function StressTest({ baseInputs }) {
   const currentEV = points.find((p) => p.p10 === Math.round(currentP10 / 2) * 2)?.ev || 0;
 
   const w = 100, h = 100;
-  const yScale = (ev) => h / 2 - (ev / maxEV) * (h / 2 - 6);
+  const yScale = (ev) => h / 2 - (ev / maxEV) * (h / 2 - 8);
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${(p.p10 / 100) * w} ${yScale(p.ev)}`).join(" ");
-  // Area fill path
   const areaD = `${pathD} L ${w} ${h / 2} L 0 ${h / 2} Z`;
-  const isUp = currentEV >= 0;
+  const headroom = breakEvenPoint ? currentP10 - breakEvenPoint.p10 : null;
 
   return (
-    <div>
-      {/* Bloomberg-style ticker header */}
-      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
-        <div className="flex items-center gap-2">
-          <Activity size={10} className="text-amber-500" />
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">EV · PSA 10 RATE</span>
-          <span className="text-[9px] text-stone-600 font-mono">SENSITIVITY</span>
-        </div>
-        <div className="flex items-center gap-3 text-[10px] font-mono">
-          <span className="text-stone-600">{fmtPct(currentP10)}</span>
-          <span className={isUp ? "text-emerald-400" : "text-rose-400"}>
-            {isUp ? "▲" : "▼"} {fmt$(currentEV)}
-          </span>
-        </div>
-      </div>
+    <Card>
+      <CardHeader
+        title="Sensitivity to PSA 10 rate"
+        subtitle="How expected value changes if your gem rate is higher or lower than modeled"
+        right={<Pill tone={signTone(currentEV)}>{fmtSigned$(currentEV)}</Pill>}
+      />
+      <div className="px-5">
+        <div className="relative h-52">
+          <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full overflow-visible">
+            <defs>
+              <linearGradient id="stress-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" style={{ stopColor: col("accent", 0.22) }} />
+                <stop offset="50%" style={{ stopColor: col("accent", 0.04) }} />
+                <stop offset="100%" style={{ stopColor: col("accent", 0.22) }} />
+              </linearGradient>
+            </defs>
+            {[0, 25, 75, 100].map((y) => (
+              <line key={y} x1="0" y1={y} x2={w} y2={y} style={{ stroke: col("line") }} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            ))}
+            <line x1="0" y1={h / 2} x2={w} y2={h / 2} style={{ stroke: col("line-strong") }} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            <path d={areaD} fill="url(#stress-fill)" />
+            <path d={pathD} fill="none" style={{ stroke: col("accent") }} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+            {breakEvenPoint && (
+              <line x1={breakEvenPoint.p10} y1="0" x2={breakEvenPoint.p10} y2={h} style={{ stroke: col("faint") }} strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+            )}
+            <line x1={currentP10} y1="0" x2={currentP10} y2={h} style={{ stroke: col("accent", 0.5) }} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          </svg>
 
-      <div className="relative bg-stone-950 border border-stone-800 rounded-sm h-44 overflow-hidden">
-        {/* Grid */}
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
-          {/* Horizontal grid lines */}
-          {[0, 25, 50, 75, 100].map((pct) => (
-            <line key={`h${pct}`} x1="0" y1={pct} x2={w} y2={pct} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
-          ))}
-          {/* Vertical grid lines */}
-          {[0, 20, 40, 60, 80, 100].map((pct) => (
-            <line key={`v${pct}`} x1={pct} y1="0" x2={pct} y2={h} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
-          ))}
-          {/* Zero line */}
-          <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="rgb(87 83 78)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
-          {/* Area fill */}
-          <path d={areaD} fill="rgb(245 158 11)" fillOpacity="0.08" />
-          {/* Curve */}
-          <path d={pathD} fill="none" stroke="rgb(245 158 11)" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
-          {/* Break-even marker */}
-          {breakEvenPoint && (
-            <line x1={breakEvenPoint.p10} y1="0" x2={breakEvenPoint.p10} y2={h} stroke="rgb(120 113 108)" strokeWidth="0.3" strokeDasharray="2,2" vectorEffect="non-scaling-stroke" />
-          )}
-          {/* Current position crosshair */}
-          <line x1={currentP10} y1="0" x2={currentP10} y2={h} stroke="rgb(245 158 11)" strokeWidth="0.4" strokeDasharray="1,1" vectorEffect="non-scaling-stroke" />
-          <line x1="0" y1={yScale(currentEV)} x2={w} y2={yScale(currentEV)} stroke="rgb(245 158 11)" strokeWidth="0.4" strokeDasharray="1,1" vectorEffect="non-scaling-stroke" />
-          {/* Current dot */}
-          <circle cx={currentP10} cy={yScale(currentEV)} r="1.4" fill="rgb(245 158 11)" stroke="rgb(28 25 23)" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
-        </svg>
-        {/* Y-axis labels */}
-        <div className="absolute top-1 left-2 text-[9px] text-stone-600 font-mono">+{fmt$(maxEV)}</div>
-        <div className="absolute top-1/2 left-2 text-[9px] text-stone-600 font-mono -translate-y-1/2">$0</div>
-        <div className="absolute bottom-1 left-2 text-[9px] text-stone-600 font-mono">-{fmt$(maxEV)}</div>
-        {/* X-axis labels */}
-        <div className="absolute bottom-1 right-12 text-[9px] text-stone-600 font-mono">50%</div>
-        <div className="absolute bottom-1 right-2 text-[9px] text-stone-600 font-mono">100%</div>
-        {/* Break-even ticker */}
-        {breakEvenPoint && (
+          {/* Current position dot */}
           <div
-            className="absolute top-1 text-[9px] font-mono px-1 bg-stone-900 border border-stone-700 text-stone-400"
-            style={{ left: `${breakEvenPoint.p10}%`, transform: "translateX(-50%)" }}
-          >
-            BE {breakEvenPoint.p10}%
-          </div>
-        )}
-      </div>
+            className="absolute w-3 h-3 rounded-full bg-accent ring-[3px] ring-surface -translate-x-1/2 -translate-y-1/2 shadow"
+            style={{ left: `${Math.min(100, Math.max(0, currentP10))}%`, top: `${yScale(currentEV)}%` }}
+          />
+          {breakEvenPoint && (
+            <div
+              className="absolute top-1 translate-x-1.5 px-1.5 py-0.5 rounded-md bg-surface ring-1 ring-line text-[11px] text-muted tabular-nums whitespace-nowrap"
+              style={{ left: `${breakEvenPoint.p10}%` }}
+            >
+              Break-even {breakEvenPoint.p10}%
+            </div>
+          )}
 
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] font-mono">
-        <div className="text-stone-500">Current: <span className="text-amber-400">{currentP10.toFixed(1)}%</span></div>
-        <div className="text-stone-500 text-center">Break-even: <span className="text-stone-300">{breakEvenPoint ? `${breakEvenPoint.p10}%` : "N/A"}</span></div>
-        <div className="text-stone-500 text-right">Headroom: <span className={breakEvenPoint && currentP10 > breakEvenPoint.p10 ? "text-emerald-400" : "text-rose-400"}>{breakEvenPoint ? `${(currentP10 - breakEvenPoint.p10).toFixed(1)}pp` : "—"}</span></div>
+          <div className="absolute top-1 left-1.5 text-[11px] text-faint tabular-nums">+{fmt$(maxEV)}</div>
+          <div className="absolute top-1/2 left-1.5 -translate-y-[calc(100%+2px)] text-[11px] text-faint">$0</div>
+          <div className="absolute bottom-1 left-1.5 text-[11px] text-faint tabular-nums">-{fmt$(maxEV)}</div>
+        </div>
+        <div className="flex justify-between pt-2 text-[11px] text-faint tabular-nums">
+          <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100% PSA 10 rate</span>
+        </div>
       </div>
-    </div>
+      <div className="grid grid-cols-3 gap-px bg-line border-t border-line mt-4 rounded-b-xl overflow-hidden">
+        <Stat label="Your rate" value={`${currentP10.toFixed(1)}%`} />
+        <Stat label="Break-even" value={breakEvenPoint ? `${breakEvenPoint.p10}%` : "N/A"} />
+        <Stat
+          label="Headroom"
+          value={headroom !== null ? `${headroom > 0 ? "+" : ""}${headroom.toFixed(1)} pts` : "—"}
+          tone={headroom !== null && headroom > 0 ? "pos" : "neg"}
+        />
+      </div>
+    </Card>
   );
 }
 
-// ===== Cost / Revenue P&L statement (waterfall) =====
+// ===== Cost / Revenue P&L statement =====
 function CostWaterfall({ rawCost, salesTaxPct, buyShippingCost, gradingCost, shippingCost, sellFeePct, result, ownsCard }) {
   const tax = rawCost * salesTaxPct / 100;
   const expectedGross = result.outcomes.reduce((s, o) => s + o.prob * o.grossPrice, 0);
@@ -484,334 +676,252 @@ function CostWaterfall({ rawCost, salesTaxPct, buyShippingCost, gradingCost, shi
   let bars;
   if (ownsCard) {
     bars = [
-      { label: "GRADED SALE (E)", value: expectedGross, type: "rev" },
+      { label: "Graded sale (expected)", value: expectedGross, type: "rev" },
       { label: "Sell fees", value: -sellFee, type: "cost" },
       { label: "Grading", value: -gradingCost, type: "cost" },
-      { label: "Round-trip ship", value: -shippingCost, type: "cost" },
-      { label: "Raw sell forgone", value: -rawCost * (1 - sellFeePct / 100), type: "alt" },
+      { label: "Round-trip shipping", value: -shippingCost, type: "cost" },
+      { label: "Raw sale forgone", value: -rawCost * (1 - sellFeePct / 100), type: "alt" },
     ];
   } else {
     bars = [
-      { label: "GRADED SALE (E)", value: expectedGross, type: "rev" },
+      { label: "Graded sale (expected)", value: expectedGross, type: "rev" },
       { label: "Sell fees", value: -sellFee, type: "cost" },
-      { label: "Raw cost", value: -rawCost, type: "cost" },
+      { label: "Raw card", value: -rawCost, type: "cost" },
       { label: "Sales tax", value: -tax, type: "cost" },
       { label: "Buy shipping", value: -buyShippingCost, type: "cost" },
       { label: "Grading", value: -gradingCost, type: "cost" },
-      { label: "Round-trip ship", value: -shippingCost, type: "cost" },
+      { label: "Round-trip shipping", value: -shippingCost, type: "cost" },
     ];
   }
 
-  // Compute running balance + max abs for bar scaling
   const maxAbs = Math.max(...bars.map((b) => Math.abs(b.value)), 1);
-  let runningTotal = 0;
-  const rows = bars.map((b) => {
-    runningTotal += b.value;
-    return { ...b, runningTotal };
-  });
-
-  const final = runningTotal;
+  const final = bars.reduce((s, b) => s + b.value, 0);
 
   return (
-    <div>
-      {/* Terminal header */}
-      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
-        <div className="flex items-center gap-2">
-          <span className="text-emerald-500 font-mono text-[10px]">▮</span>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">P&amp;L · EXPECTED VALUE</span>
-        </div>
-        <div className={`text-[10px] font-mono px-2 py-0.5 rounded-sm ${final >= 0 ? "bg-emerald-950/40 text-emerald-300 border border-emerald-900/40" : "bg-rose-950/40 text-rose-300 border border-rose-900/40"}`}>
-          NET: {final >= 0 ? "+" : ""}${final.toFixed(2)}
-        </div>
-      </div>
-
-      {/* P&L rows */}
-      <div className="space-y-px font-mono text-[11px] bg-stone-950 border border-stone-800 rounded-sm overflow-hidden">
-        {rows.map((bar, i) => {
-          const widthPct = (Math.abs(bar.value) / maxAbs) * 50; // half width max
+    <Card className="flex flex-col">
+      <CardHeader title="Expected P&L" subtitle="Probability-weighted, per card" />
+      <div className="px-5 flex-1">
+        {bars.map((bar, i) => {
           const positive = bar.value >= 0;
           return (
-            <div key={i} className="grid grid-cols-[150px_1fr_85px_90px] items-center px-3 py-1.5 hover:bg-stone-900/50 transition-colors">
-              <div className={`text-[10px] truncate ${bar.type === "rev" ? "text-emerald-400 font-medium" : "text-stone-400"}`}>{bar.label}</div>
-              <div className="relative h-3 mx-2">
-                <div className="absolute inset-y-0 left-1/2 w-px bg-stone-700" />
-                <div
-                  className={`absolute inset-y-0 ${positive ? "left-1/2 bg-emerald-500/60" : "right-1/2 bg-rose-500/60"}`}
-                  style={{ width: `${widthPct}%` }}
-                />
+            <div key={i} className="grid grid-cols-[1fr_64px_80px] gap-3 items-center py-2 border-t border-line first:border-t-0">
+              <div className={`text-[13px] truncate ${bar.type === "rev" ? "text-ink font-medium" : "text-ink-2"}`}>{bar.label}</div>
+              <div className="h-1.5 rounded-full bg-subtle overflow-hidden flex justify-end">
+                <div className={`h-full rounded-full ${positive ? "bg-pos/70" : "bg-neg/60"}`} style={{ width: `${(Math.abs(bar.value) / maxAbs) * 100}%` }} />
               </div>
-              <div className={`text-right tabular-nums ${positive ? "text-emerald-300" : "text-rose-300"}`}>
-                {positive ? "+" : ""}{bar.value.toFixed(2)}
-              </div>
-              <div className="text-right tabular-nums text-stone-500 text-[10px]">
-                = {bar.runningTotal >= 0 ? "+" : ""}{bar.runningTotal.toFixed(2)}
+              <div className={`text-[13px] text-right tabular-nums ${positive ? "text-pos" : "text-ink-2"}`}>
+                {fmtSigned$(bar.value)}
               </div>
             </div>
           );
         })}
-        {/* Final summary row */}
-        <div className={`grid grid-cols-[150px_1fr_85px_90px] items-center px-3 py-2 border-t border-stone-700 ${final >= 0 ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
-          <div className="text-[10px] uppercase tracking-wider text-stone-300 font-medium">Expected Profit</div>
-          <div></div>
-          <div></div>
-          <div className={`text-right tabular-nums font-medium ${final >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
-            {final >= 0 ? "+" : ""}${final.toFixed(2)}
-          </div>
-        </div>
       </div>
-    </div>
+      <div className="mx-5 mb-5 mt-2 flex items-center justify-between rounded-lg bg-subtle px-3 h-10">
+        <span className="text-[13px] font-medium text-ink">Expected profit</span>
+        <span className={`text-[15px] font-semibold tabular-nums ${final >= 0 ? "text-pos" : "text-neg"}`}>{fmtSigned$(final)}</span>
+      </div>
+    </Card>
   );
 }
 
 // ===== Risk / Reward scatter =====
 function RiskRewardScatter({ outcomes }) {
-  const labels = { psa10: "PSA10", psa9: "PSA9", psa8: "PSA8", psa7orLower: "≤PSA7" };
-  const w = 100, h = 100;
   const maxProb = Math.max(...outcomes.map((o) => o.prob), 0.01);
   const maxAbsProfit = Math.max(...outcomes.map((o) => Math.abs(o.profit)), 1);
 
-  const points = outcomes.map((o) => {
-    const x = (o.prob / maxProb) * 80 + 12;
-    const y = h / 2 - (o.profit / maxAbsProfit) * (h / 2 - 10);
-    return { ...o, x, y };
-  });
-
-  // Compute the dominant point (highest profit × probability)
+  const points = outcomes.map((o) => ({
+    ...o,
+    x: (o.prob / maxProb) * 72 + 16,
+    y: 50 - (o.profit / maxAbsProfit) * 34,
+    size: 30 + Math.sqrt(o.prob) * 40,
+  }));
   const dominant = points.reduce((best, p) => (p.profit * p.prob > best.profit * best.prob ? p : best), points[0]);
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
-        <div className="flex items-center gap-2">
-          <span className="text-amber-500 font-mono text-[10px]">◆</span>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">RISK · REWARD MATRIX</span>
-        </div>
-        <span className="text-[9px] text-stone-600 font-mono">bubble = probability</span>
-      </div>
-
-      <div className="relative bg-stone-950 border border-stone-800 rounded-sm h-44 overflow-hidden">
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
-          {/* Quadrant tints - profitable top, loss bottom */}
-          <rect x="0" y="0" width={w} height={h / 2} fill="rgb(16 185 129)" fillOpacity="0.03" />
-          <rect x="0" y={h / 2} width={w} height={h / 2} fill="rgb(239 68 68)" fillOpacity="0.03" />
-          {/* Grid */}
-          {[20, 40, 60, 80].map((v) => (
-            <line key={`vg${v}`} x1={v} y1="0" x2={v} y2={h} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
+    <Card className="flex flex-col">
+      <CardHeader title="Risk vs. reward" subtitle="Bubble size = probability of that grade" />
+      <div className="px-5 flex-1">
+        <div className="relative h-56 rounded-lg overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-1/2 bg-pos/[0.04]" />
+          <div className="absolute inset-x-0 bottom-0 h-1/2 bg-neg/[0.04]" />
+          <div className="absolute inset-x-0 top-1/2 h-px bg-line-strong" />
+          {[25, 75].map((y) => (
+            <div key={y} className="absolute inset-x-0 h-px bg-line" style={{ top: `${y}%` }} />
           ))}
-          {[25, 75].map((v) => (
-            <line key={`hg${v}`} x1="0" y1={v} x2={w} y2={v} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
-          ))}
-          {/* Zero axes */}
-          <line x1="0" y1={h / 2} x2={w} y2={h / 2} stroke="rgb(87 83 78)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
-          <line x1="12" y1="0" x2="12" y2={h} stroke="rgb(87 83 78)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
-
-          {/* Points */}
+          <div className="absolute top-2 left-2.5 text-[11px] text-faint">Profit ↑</div>
+          <div className="absolute bottom-2 left-2.5 text-[11px] text-faint">Loss ↓</div>
+          <div className="absolute bottom-2 right-2.5 text-[11px] text-faint">More likely →</div>
           {points.map((p) => {
             const positive = p.profit >= 0;
-            const radius = 2.5 + Math.sqrt(p.prob) * 7;
             const isDominant = p.grade === dominant.grade && p.profit > 0;
             return (
-              <g key={p.grade}>
-                {isDominant && (
-                  <circle cx={p.x} cy={p.y} r={radius + 1.5} fill="none" stroke="rgb(245 158 11)" strokeWidth="0.4" strokeDasharray="1.5,1" vectorEffect="non-scaling-stroke" />
-                )}
-                <circle
-                  cx={p.x}
-                  cy={p.y}
-                  r={radius}
-                  fill={positive ? "rgb(16 185 129)" : "rgb(239 68 68)"}
-                  fillOpacity="0.4"
-                  stroke={positive ? "rgb(110 231 183)" : "rgb(252 165 165)"}
-                  strokeWidth="0.5"
-                  vectorEffect="non-scaling-stroke"
-                />
-                <text
-                  x={p.x}
-                  y={p.y + 1}
-                  fontSize="2.4"
-                  fill={positive ? "rgb(220 252 231)" : "rgb(254 226 226)"}
-                  textAnchor="middle"
-                  fontFamily="ui-monospace, monospace"
-                  fontWeight="500"
-                >
-                  {labels[p.grade]}
-                </text>
-              </g>
+              <div
+                key={p.grade}
+                className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full grid place-items-center text-[11px] font-semibold border transition-all ${
+                  isDominant ? "ring-2 ring-accent/50 ring-offset-2 ring-offset-surface" : ""
+                }`}
+                style={{
+                  left: `${p.x}%`,
+                  top: `${p.y}%`,
+                  width: p.size,
+                  height: p.size,
+                  background: col(positive ? "pos" : "neg", 0.14),
+                  borderColor: col(positive ? "pos" : "neg", 0.45),
+                  color: col(positive ? "pos" : "neg"),
+                }}
+                title={`${GRADE_LABELS[p.grade]}: ${(p.prob * 100).toFixed(1)}% · ${fmtSigned$(p.profit)}`}
+              >
+                {GRADE_LABELS[p.grade].replace("PSA ", "")}
+              </div>
             );
           })}
-        </svg>
-
-        {/* Axis labels */}
-        <div className="absolute top-1 right-2 text-[8px] text-emerald-700 font-mono uppercase tracking-wider">↑ profit</div>
-        <div className="absolute bottom-1 right-2 text-[8px] text-rose-700 font-mono uppercase tracking-wider">↓ loss</div>
-        <div className="absolute bottom-1 left-2 text-[8px] text-stone-600 font-mono uppercase tracking-wider">prob →</div>
-
-        {/* Y-axis labels */}
-        <div className="absolute top-1 left-2 text-[9px] text-stone-600 font-mono">+{fmt$(maxAbsProfit)}</div>
-        <div className="absolute bottom-6 left-2 text-[9px] text-stone-600 font-mono">-{fmt$(maxAbsProfit)}</div>
+        </div>
       </div>
-
-      <div className="mt-2 text-[10px] font-mono text-stone-500">
-        Best risk-adjusted: <span className="text-amber-400">{labels[dominant.grade] || "—"}</span>
-        <span className="text-stone-700"> · </span>
-        <span className="text-stone-400">{fmtPct(dominant.prob * 100)}</span>
-        <span className="text-stone-700"> @ </span>
-        <span className={dominant.profit >= 0 ? "text-emerald-400" : "text-rose-400"}>
-          {dominant.profit >= 0 ? "+" : ""}{fmt$(dominant.profit)}
-        </span>
+      <div className="px-5 py-4 text-[13px] text-muted">
+        Best risk-adjusted outcome:{" "}
+        <span className="text-ink font-medium">{GRADE_LABELS[dominant.grade] || "—"}</span>
+        {" · "}
+        <span className="tabular-nums">{fmtPct(dominant.prob * 100)}</span> chance at{" "}
+        <span className={`font-medium tabular-nums ${dominant.profit >= 0 ? "text-pos" : "text-neg"}`}>{fmtSigned$(dominant.profit)}</span>
       </div>
-    </div>
+    </Card>
   );
 }
 
 // ===== Monte Carlo simulation =====
 function MonteCarloDistribution({ outcomes, runs = 5000 }) {
-  // Run simulation
-  const cumulative = [];
-  let acc = 0;
-  for (const o of outcomes) {
-    acc += o.prob;
-    cumulative.push({ grade: o.grade, profit: o.profit, cum: acc });
-  }
+  // Memoized so the histogram doesn't reshuffle on unrelated re-renders
+  const sim = useMemo(() => {
+    const cumulative = [];
+    let acc = 0;
+    for (const o of outcomes) {
+      acc += o.prob;
+      cumulative.push({ grade: o.grade, profit: o.profit, cum: acc });
+    }
 
-  const results = [];
-  for (let i = 0; i < runs; i++) {
-    const r = Math.random();
-    for (const c of cumulative) {
-      if (r <= c.cum) {
-        results.push(c.profit);
-        break;
+    const results = [];
+    for (let i = 0; i < runs; i++) {
+      const r = Math.random();
+      for (const c of cumulative) {
+        if (r <= c.cum) {
+          results.push(c.profit);
+          break;
+        }
       }
     }
-  }
 
-  // Histogram
-  const minProfit = Math.min(...results);
-  const maxProfit = Math.max(...results);
-  const range = maxProfit - minProfit || 1;
-  const numBuckets = 30;
-  const buckets = Array(numBuckets).fill(0);
-  results.forEach((p) => {
-    const idx = Math.min(Math.floor(((p - minProfit) / range) * numBuckets), numBuckets - 1);
-    buckets[idx]++;
-  });
-  const maxCount = Math.max(...buckets);
+    const minProfit = Math.min(...results);
+    const maxProfit = Math.max(...results);
+    const range = maxProfit - minProfit || 1;
+    const numBuckets = 30;
+    const buckets = Array(numBuckets).fill(0);
+    results.forEach((p) => {
+      const idx = Math.min(Math.floor(((p - minProfit) / range) * numBuckets), numBuckets - 1);
+      buckets[idx]++;
+    });
+    const maxCount = Math.max(...buckets);
 
-  // Percentiles
-  const sorted = [...results].sort((a, b) => a - b);
-  const p5 = sorted[Math.floor(runs * 0.05)];
-  const p25 = sorted[Math.floor(runs * 0.25)];
-  const p50 = sorted[Math.floor(runs * 0.50)];
-  const p75 = sorted[Math.floor(runs * 0.75)];
-  const p95 = sorted[Math.floor(runs * 0.95)];
-  const mean = sorted.reduce((s, v) => s + v, 0) / runs;
+    const sorted = [...results].sort((a, b) => a - b);
+    const n = sorted.length;
+    return {
+      buckets, maxCount, minProfit, maxProfit, range, numBuckets,
+      p5: sorted[Math.floor(n * 0.05)],
+      p25: sorted[Math.floor(n * 0.25)],
+      p50: sorted[Math.floor(n * 0.5)],
+      p75: sorted[Math.floor(n * 0.75)],
+      p95: sorted[Math.floor(n * 0.95)],
+      mean: sorted.reduce((s, v) => s + v, 0) / n,
+      winRate: (sorted.filter((v) => v > 0).length / n) * 100,
+    };
+  }, [outcomes, runs]);
 
-  // Win rate
-  const winCount = sorted.filter((v) => v > 0).length;
-  const winRate = (winCount / runs) * 100;
-
-  // x position helper
+  const { buckets, maxCount, minProfit, maxProfit, range, numBuckets, p5, p25, p50, p75, p95, mean, winRate } = sim;
   const xFor = (val) => ((val - minProfit) / range) * 100;
-  const zeroX = xFor(0);
+
+  const Marker = ({ value, className }) => (
+    <div className={`absolute top-0 bottom-0 border-l ${className}`} style={{ left: `${xFor(value)}%` }} />
+  );
 
   return (
+    <Card>
+      <CardHeader
+        title="Monte Carlo simulation"
+        subtitle={`${runs.toLocaleString()} simulated submissions of this card`}
+        right={
+          <div className="flex gap-2">
+            <Pill tone={signTone(mean)}>Mean {fmtSigned$(mean)}</Pill>
+            <Pill>Win rate {winRate.toFixed(0)}%</Pill>
+          </div>
+        }
+      />
+      <div className="px-5">
+        <div className="relative h-44">
+          <div className="absolute inset-0 flex items-end gap-[3px]">
+            {buckets.map((count, i) => {
+              const bucketStart = minProfit + (i / numBuckets) * range;
+              const bucketEnd = minProfit + ((i + 1) / numBuckets) * range;
+              const tone = bucketStart >= 0 ? "pos" : bucketStart < 0 && bucketEnd > 0 ? "faint" : "neg";
+              const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
+              return (
+                <div
+                  key={i}
+                  className="flex-1 rounded-t-[3px]"
+                  style={{ height: count > 0 ? `max(${pct}%, 2px)` : 0, background: col(tone, tone === "faint" ? 0.6 : 0.55) }}
+                />
+              );
+            })}
+          </div>
+          {minProfit < 0 && maxProfit > 0 && <Marker value={0} className="border-line-strong" />}
+          <Marker value={p5} className="border-dashed border-neg" />
+          <Marker value={p50} className="border-ink" />
+          <Marker value={p95} className="border-dashed border-pos" />
+        </div>
+        <div className="flex justify-between pt-2 text-[11px] text-faint tabular-nums border-t border-line">
+          <span>{fmt$(minProfit)}</span>
+          <span>{fmt$(maxProfit)}</span>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-[12px] text-muted">
+          <span className="inline-flex items-center gap-1.5"><span className="w-3 border-t border-dashed border-neg" />5th percentile</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-3 border-t border-ink" />Median</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-3 border-t border-dashed border-pos" />95th percentile</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-line border-t border-line mt-4 rounded-b-xl overflow-hidden">
+        <Stat label="Worst 5% (VaR)" value={fmtSigned$(Math.round(p5))} tone={signTone(p5)} />
+        <Stat label="25th pct" value={fmtSigned$(Math.round(p25))} tone={signTone(p25)} />
+        <Stat label="Median" value={fmtSigned$(Math.round(p50))} tone={signTone(p50)} />
+        <Stat label="75th pct" value={fmtSigned$(Math.round(p75))} tone={signTone(p75)} />
+        <Stat label="Best 5%" value={fmtSigned$(Math.round(p95))} tone={signTone(p95)} />
+      </div>
+    </Card>
+  );
+}
+
+// Stacked bar of the probabilities actually being used
+function ProbabilityBar({ probabilities }) {
+  const segs = [
+    { key: "psa10", label: "PSA 10", a: 1 },
+    { key: "psa9", label: "PSA 9", a: 0.6 },
+    { key: "psa8", label: "PSA 8", a: 0.35 },
+    { key: "psa7orLower", label: "≤7", a: 0.15 },
+  ];
+  return (
     <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-800">
-        <div className="flex items-center gap-2">
-          <span className="text-blue-500 font-mono text-[10px]">▦</span>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">MONTE CARLO · DISTRIBUTION</span>
-          <span className="text-[9px] text-stone-600 font-mono">N={runs.toLocaleString()}</span>
-        </div>
-        <div className="flex gap-3 text-[10px] font-mono">
-          <span className="text-stone-500">μ=<span className={mean >= 0 ? "text-emerald-400" : "text-rose-400"}>{mean >= 0 ? "+" : ""}{mean.toFixed(2)}</span></span>
-          <span className="text-stone-500">WIN=<span className="text-stone-300">{winRate.toFixed(1)}%</span></span>
-        </div>
+      <div className="flex h-2 rounded-full overflow-hidden bg-subtle gap-[2px]">
+        {segs.map((s) => (
+          <div key={s.key} style={{ width: `${Math.max(0, probabilities[s.key])}%`, background: col("accent", s.a) }} />
+        ))}
       </div>
-
-      <div className="relative bg-stone-950 border border-stone-800 rounded-sm h-44 overflow-hidden">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
-          {/* Background grid */}
-          {[20, 40, 60, 80].map((v) => (
-            <line key={`g${v}`} x1="0" y1={v} x2="100" y2={v} stroke="rgb(41 37 36)" strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
-          ))}
-
-          {/* Histogram bars */}
-          {buckets.map((count, i) => {
-            const height = (count / maxCount) * 88;
-            const x = (i / numBuckets) * 100;
-            const barW = 100 / numBuckets - 0.3;
-            const bucketStart = minProfit + (i / numBuckets) * range;
-            const bucketEnd = minProfit + ((i + 1) / numBuckets) * range;
-            const positive = bucketStart >= 0;
-            const straddlesZero = bucketStart < 0 && bucketEnd > 0;
-            return (
-              <rect
-                key={i}
-                x={x}
-                y={100 - height - 6}
-                width={barW}
-                height={height}
-                fill={positive ? "rgb(16 185 129)" : straddlesZero ? "rgb(120 113 108)" : "rgb(239 68 68)"}
-                fillOpacity="0.6"
-                stroke={positive ? "rgb(16 185 129)" : straddlesZero ? "rgb(120 113 108)" : "rgb(239 68 68)"}
-                strokeWidth="0.2"
-                vectorEffect="non-scaling-stroke"
-              />
-            );
-          })}
-
-          {/* P5 line (VaR) */}
-          <line x1={xFor(p5)} y1="0" x2={xFor(p5)} y2="100" stroke="rgb(239 68 68)" strokeWidth="0.5" strokeDasharray="2,1" vectorEffect="non-scaling-stroke" />
-          {/* P50 line (median) */}
-          <line x1={xFor(p50)} y1="0" x2={xFor(p50)} y2="100" stroke="rgb(245 158 11)" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-          {/* P95 line */}
-          <line x1={xFor(p95)} y1="0" x2={xFor(p95)} y2="100" stroke="rgb(16 185 129)" strokeWidth="0.5" strokeDasharray="2,1" vectorEffect="non-scaling-stroke" />
-          {/* Zero line */}
-          {minProfit < 0 && maxProfit > 0 && (
-            <line x1={zeroX} y1="0" x2={zeroX} y2="100" stroke="rgb(244 244 245)" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
-          )}
-        </svg>
-
-        {/* Floating labels */}
-        <div className="absolute top-1 left-2 text-[9px] text-rose-500 font-mono" style={{ left: `${xFor(p5)}%`, transform: "translateX(-50%)" }}>
-          P5
-        </div>
-        <div className="absolute top-1 text-[9px] text-amber-400 font-mono" style={{ left: `${xFor(p50)}%`, transform: "translateX(-50%)" }}>
-          MED
-        </div>
-        <div className="absolute top-1 text-[9px] text-emerald-400 font-mono" style={{ left: `${xFor(p95)}%`, transform: "translateX(-50%)" }}>
-          P95
-        </div>
-
-        {/* x-axis labels */}
-        <div className="absolute bottom-1 left-2 text-[9px] text-stone-600 font-mono">{fmt$(minProfit)}</div>
-        <div className="absolute bottom-1 right-2 text-[9px] text-stone-600 font-mono">{fmt$(maxProfit)}</div>
-      </div>
-
-      {/* Percentile readout */}
-      <div className="mt-2 grid grid-cols-5 gap-1 text-[9px] font-mono">
-        <div className="bg-rose-950/30 border border-rose-900/40 px-2 py-1 rounded-sm">
-          <div className="text-rose-500 uppercase tracking-wider text-[8px]">P5 VaR</div>
-          <div className={`${p5 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p5 >= 0 ? "+" : ""}${p5.toFixed(0)}</div>
-        </div>
-        <div className="bg-stone-900 border border-stone-800 px-2 py-1 rounded-sm">
-          <div className="text-stone-500 uppercase tracking-wider text-[8px]">P25</div>
-          <div className={`${p25 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p25 >= 0 ? "+" : ""}${p25.toFixed(0)}</div>
-        </div>
-        <div className="bg-amber-950/30 border border-amber-900/40 px-2 py-1 rounded-sm">
-          <div className="text-amber-500 uppercase tracking-wider text-[8px]">MEDIAN</div>
-          <div className={`${p50 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p50 >= 0 ? "+" : ""}${p50.toFixed(0)}</div>
-        </div>
-        <div className="bg-stone-900 border border-stone-800 px-2 py-1 rounded-sm">
-          <div className="text-stone-500 uppercase tracking-wider text-[8px]">P75</div>
-          <div className={`${p75 < 0 ? "text-rose-300" : "text-emerald-300"}`}>{p75 >= 0 ? "+" : ""}${p75.toFixed(0)}</div>
-        </div>
-        <div className="bg-emerald-950/30 border border-emerald-900/40 px-2 py-1 rounded-sm">
-          <div className="text-emerald-500 uppercase tracking-wider text-[8px]">P95</div>
-          <div className="text-emerald-300">+${p95.toFixed(0)}</div>
-        </div>
+      <div className="grid grid-cols-4 gap-2 mt-3">
+        {segs.map((s) => (
+          <div key={s.key}>
+            <div className="flex items-center gap-1.5 text-[12px] text-muted">
+              <span className="w-2 h-2 rounded-sm" style={{ background: col("accent", s.a) }} />
+              {s.label}
+            </div>
+            <div className="text-[14px] font-medium text-ink tabular-nums mt-0.5">{probabilities[s.key].toFixed(1)}%</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -825,7 +935,7 @@ export default function CardGradingEV() {
   const [rawCost, setRawCost] = useState(50);
   const [salesTaxPct, setSalesTaxPct] = useState(8);
   const [buyShippingCost, setBuyShippingCost] = useState(5);
-  const [tierId, setTierId] = useState("value");
+  const [tierId, setTierId] = useState("standard");
   const [shippingCost, setShippingCost] = useState(15);
   const [cardsInSubmission, setCardsInSubmission] = useState(1);
   const [sellFeePct, setSellFeePct] = useState(13);
@@ -852,7 +962,7 @@ export default function CardGradingEV() {
 
   // Submission builder state
   const [submission, setSubmission] = useState([]);
-  const [submissionTier, setSubmissionTier] = useState("value");
+  const [submissionTier, setSubmissionTier] = useState("standard");
   const [submissionShipping, setSubmissionShipping] = useState(15);
   const [submissionSellFee, setSubmissionSellFee] = useState(13);
 
@@ -875,7 +985,7 @@ export default function CardGradingEV() {
       const subSettings = localStorage.getItem("submissionSettings");
       if (subSettings) {
         const s = JSON.parse(subSettings);
-        if (s.tier) setSubmissionTier(s.tier);
+        if (s.tier && PSA_TIERS.some((t) => t.id === s.tier)) setSubmissionTier(s.tier);
         if (s.shipping !== undefined) setSubmissionShipping(s.shipping);
         if (s.sellFee !== undefined) setSubmissionSellFee(s.sellFee);
       }
@@ -952,7 +1062,7 @@ export default function CardGradingEV() {
     setActiveTab("input");
   };
 
-  const tier = PSA_TIERS.find((t) => t.id === tierId) || PSA_TIERS[1];
+  const tier = PSA_TIERS.find((t) => t.id === tierId) || PSA_TIERS[0];
 
   const probabilities = useMemo(() => {
     if (usePopReport) {
@@ -1078,7 +1188,7 @@ export default function CardGradingEV() {
 
   // Compute per-card and aggregate stats for the submission
   const submissionResults = useMemo(() => {
-    const submissionTierObj = PSA_TIERS.find((t) => t.id === submissionTier) || PSA_TIERS[1];
+    const submissionTierObj = PSA_TIERS.find((t) => t.id === submissionTier) || PSA_TIERS[0];
     const n = submission.length;
     const perCardShip = n > 0 ? submissionShipping / n : submissionShipping;
 
@@ -1123,737 +1233,564 @@ export default function CardGradingEV() {
     };
   }, [submission, submissionTier, submissionShipping, submissionSellFee]);
 
-  return (
-    <div className="min-h-screen bg-stone-950 text-stone-100" style={{ fontFamily: '"Söhne", "Inter", system-ui, sans-serif' }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap');
-        body { font-family: 'Inter', system-ui, sans-serif; }
-        .font-display { font-family: 'Fraunces', Georgia, serif; font-optical-sizing: auto; }
-        .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-        input[type=number] { -moz-appearance: textfield; }
-        .grain { position: relative; }
-        .grain::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.03; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E"); }
-      `}</style>
+  const verdict = VERDICTS[result.verdict] || VERDICTS.MARGINAL;
+  const evToneKey = { positive: "pos", negative: "neg", warning: "warn" }[evTone];
+  const atRisk = result.totalCost + (result.opportunityCost || 0);
+  const costLine = ownsCard
+    ? `$${tier.cost.toFixed(2)} grading + $${perCardShipping.toFixed(2)} shipping · giving up $${(rawCost * (1 - sellFeePct / 100)).toFixed(2)} raw sale`
+    : `$${rawCost.toFixed(2)} card + $${(rawCost * salesTaxPct / 100).toFixed(2)} tax + $${buyShippingCost.toFixed(2)} shipping + $${tier.cost.toFixed(2)} grading + $${perCardShipping.toFixed(2)} return shipping`;
 
+  const tabs = [
+    { id: "input", label: "Calculator" },
+    { id: "scanner", label: "Scanner" },
+    { id: "submission", label: "Submission", count: submission.length },
+    { id: "watchlist", label: "Watchlist", count: watchlist.length },
+    { id: "guide", label: "Method" },
+  ];
+
+  const okScans = [...scanResults].filter((r) => r.status === "ok").sort((a, b) => (b.sharpe || 0) - (a.sharpe || 0));
+  const skippedScans = scanResults.filter((r) => r.status !== "ok");
+
+  return (
+    <div className="min-h-screen bg-bg text-ink">
       {/* Header */}
-      <header className="border-b border-stone-800 grain">
-        <div className="max-w-[1400px] mx-auto px-6 py-5 flex items-center justify-between">
-          <div className="flex items-baseline gap-3">
-            <div className="font-display text-2xl font-semibold tracking-tight">Cardstack</div>
-            <div className="text-[10px] uppercase tracking-[0.3em] text-stone-500 font-medium">Grading EV Terminal</div>
-          </div>
-          <div className="flex items-center gap-1 text-[10px] uppercase tracking-[0.2em] text-stone-500">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="ml-1">Live · Risk-Adjusted Model v1.0</span>
-          </div>
+      <header className="sticky top-0 z-30 bg-bg/80 backdrop-blur-xl backdrop-saturate-150 border-b border-line">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 h-14 flex items-center gap-4 sm:gap-8">
+          <button onClick={() => setActiveTab("input")} className="flex items-center gap-2 shrink-0">
+            <Logo />
+            <span className="hidden sm:inline text-[15px] font-semibold tracking-[-0.02em]">Cardstack</span>
+          </button>
+          <nav className="flex-1 min-w-0 flex items-center gap-0.5 overflow-x-auto no-scrollbar">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                className={`h-8 px-3 rounded-lg text-[13px] font-medium whitespace-nowrap transition-colors inline-flex items-center gap-1.5 ${
+                  activeTab === t.id ? "text-ink bg-subtle" : "text-muted hover:text-ink"
+                }`}
+              >
+                {t.label}
+                {t.count > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-line text-[11px] text-ink-2 tabular-nums grid place-items-center">
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+          <ThemeToggle />
         </div>
       </header>
 
-      {/* Tabs */}
-      <div className="border-b border-stone-800">
-        <div className="max-w-[1400px] mx-auto px-6 flex gap-1">
-          {[
-            { id: "input", label: "Calculator", icon: Calculator },
-            { id: "scanner", label: "Scanner", icon: Radar },
-            { id: "submission", label: `Submission (${submission.length})`, icon: Package },
-            { id: "watchlist", label: `Watchlist (${watchlist.length})`, icon: BarChart3 },
-            { id: "guide", label: "Method", icon: Target },
-          ].map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`flex items-center gap-2 px-4 py-3 text-[11px] uppercase tracking-[0.18em] font-medium transition-colors ${
-                activeTab === id ? "text-amber-400 border-b-2 border-amber-500" : "text-stone-500 hover:text-stone-300 border-b-2 border-transparent"
-              }`}
-            >
-              <Icon size={12} />
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Main content */}
-      <main className="max-w-[1400px] mx-auto px-6 py-8">
+      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 pt-10 pb-16">
+        {/* ===================== CALCULATOR ===================== */}
         {activeTab === "input" && (
-          <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-8">
-            {/* LEFT: Inputs */}
-            <div className="space-y-7">
-              {/* Card identity */}
-              <section>
-                <SectionHeader num="01" title="Card" />
-                <div className="space-y-4 mt-4">
-                  <TextField label="Card Description" value={cardName} onChange={setCardName} placeholder="e.g. 2018 Prizm Luka Dončić #280" />
-                  <CardImageInput value={cardImage} onChange={setCardImage} />
-
-                  {/* Mode toggle */}
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">Scenario</div>
-                    <div className="flex gap-1 bg-stone-900 p-1 rounded-sm border border-stone-800">
-                      <button
-                        onClick={() => setOwnsCard(false)}
-                        className={`flex-1 py-2 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
-                          !ownsCard ? "bg-stone-800 text-amber-400" : "text-stone-500 hover:text-stone-300"
-                        }`}
-                      >
-                        Buying to Grade
-                      </button>
-                      <button
-                        onClick={() => setOwnsCard(true)}
-                        className={`flex-1 py-2 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
-                          ownsCard ? "bg-stone-800 text-amber-400" : "text-stone-500 hover:text-stone-300"
-                        }`}
-                      >
-                        Already Own It
-                      </button>
-                    </div>
-                    <div className="mt-2 text-[10px] text-stone-500 italic leading-relaxed">
-                      {ownsCard
-                        ? "Comparing: grade & sell vs. sell raw now. What you paid for the card is a sunk cost — ignore it."
-                        : "Comparing: buy raw, grade, and sell vs. doing nothing."}
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {/* Buy/sell costs section — adapts to mode */}
-              {!ownsCard ? (
-                <section>
-                  <SectionHeader num="02" title="Buy Costs" />
-                  <div className="grid grid-cols-2 gap-3 mt-4">
-                    <NumField label="Raw Buy Price" value={rawCost} onChange={setRawCost} prefix="$" />
-                    <NumField label="Sales Tax" value={salesTaxPct} onChange={setSalesTaxPct} suffix="%" hint="varies by state" />
-                    <NumField label="Shipping to You" value={buyShippingCost} onChange={setBuyShippingCost} prefix="$" hint="from seller" />
-                  </div>
-                  <div className="mt-3 px-3 py-2 bg-stone-900/50 border border-stone-800 rounded-sm flex justify-between text-[11px] font-mono">
-                    <span className="text-stone-500">All-in buy cost</span>
-                    <span className="text-stone-300">${(rawCost + rawCost * salesTaxPct / 100 + buyShippingCost).toFixed(2)}</span>
-                  </div>
-                </section>
-              ) : (
-                <section>
-                  <SectionHeader num="02" title="Opportunity Cost" />
-                  <div className="mt-4">
-                    <NumField label="Raw Sell Price Today" value={rawCost} onChange={setRawCost} prefix="$" hint="what you'd net selling raw" />
-                  </div>
-                  <div className="mt-3 px-3 py-2 bg-amber-950/20 border border-amber-900/40 rounded-sm text-[10px] text-amber-300/80 italic leading-relaxed">
-                    By grading, you give up the chance to sell raw at this price. That's the real "cost" of grading a card you already own.
-                  </div>
-                </section>
-              )}
-
-              {/* Grading tier */}
-              <section>
-                <SectionHeader num="03" title="Grading & Sell" />
-                <div className="space-y-3 mt-4">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">PSA Tier</div>
-                    <select
-                      value={tierId}
-                      onChange={(e) => {
-                        const newTier = e.target.value;
-                        setTierId(newTier);
-                        if (newTier === "valuebulk" && cardsInSubmission < 20) {
-                          setCardsInSubmission(20);
-                        }
-                      }}
-                      className="w-full bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none"
-                    >
-                      {PSA_TIERS.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name} — ${t.cost} · max ${t.maxValue} · {t.turnaround}
-                        </option>
-                      ))}
-                    </select>
-                    {tier.note && (
-                      <div className="mt-2 text-[10px] text-stone-500 italic">{tier.note}</div>
-                    )}
-                    {pricePSA10 > tier.maxValue && (
-                      <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
-                        <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
-                        <span>PSA 10 price (${pricePSA10}) exceeds tier max (${tier.maxValue}). PSA may bump you up a tier.</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <NumField label="Round-Trip Shipping" value={shippingCost} onChange={setShippingCost} prefix="$" hint="full batch" />
-                    <NumField label="Sell Fee" value={sellFeePct} onChange={setSellFeePct} suffix="%" hint="eBay ≈13%" />
-                    <NumField label="Cards in Submission" value={cardsInSubmission} onChange={(v) => setCardsInSubmission(Math.max(1, Math.round(v)))} step="1" hint="shipping divides by this" />
-                    <div className="flex flex-col justify-end">
-                      <div className="px-3 py-2 bg-stone-900/50 border border-stone-800 rounded-sm flex justify-between text-[11px] font-mono">
-                        <span className="text-stone-500">/card ship</span>
-                        <span className="text-stone-300">${perCardShipping.toFixed(2)}</span>
+          <>
+            <PageHeader
+              title="Should you grade it?"
+              description="Enter your costs, sold comps and grade odds. Cardstack prices every outcome and tells you whether the submission is worth the risk."
+            />
+            <div className="grid grid-cols-1 lg:grid-cols-[380px_minmax(0,1fr)] gap-6 items-start">
+              {/* LEFT: Inputs */}
+              <div className="space-y-4">
+                <Card className="divide-y divide-line">
+                  <FormSection title="Card">
+                    <div className="space-y-4">
+                      <TextField label="Description" value={cardName} onChange={setCardName} placeholder="2018 Prizm Luka Dončić #280" />
+                      <CardImageInput value={cardImage} onChange={setCardImage} />
+                      <div>
+                        <Label>Scenario</Label>
+                        <Segmented
+                          value={ownsCard}
+                          onChange={setOwnsCard}
+                          options={[
+                            { value: false, label: "Buying to grade" },
+                            { value: true, label: "Already own it" },
+                          ]}
+                        />
+                        <p className="mt-2 text-[12px] text-muted leading-snug">
+                          {ownsCard
+                            ? "Compares grading and selling against selling raw today. What you originally paid is a sunk cost."
+                            : "Compares buying raw, grading and selling against doing nothing."}
+                        </p>
                       </div>
                     </div>
-                  </div>
-                  {tierId === "valuebulk" && cardsInSubmission < 20 && (
-                    <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
-                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
-                      <span>Value Bulk requires a 20-card minimum submission.</span>
-                    </div>
+                  </FormSection>
+
+                  {!ownsCard ? (
+                    <FormSection title="Buy costs">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2">
+                          <NumField label="Raw price" value={rawCost} onChange={setRawCost} prefix="$" />
+                        </div>
+                        <NumField label="Sales tax" value={salesTaxPct} onChange={setSalesTaxPct} suffix="%" hint="by state" />
+                        <NumField label="Shipping to you" value={buyShippingCost} onChange={setBuyShippingCost} prefix="$" />
+                      </div>
+                      <div className="mt-3">
+                        <SummaryRow label="All-in buy cost" value={`$${(rawCost + rawCost * salesTaxPct / 100 + buyShippingCost).toFixed(2)}`} />
+                      </div>
+                    </FormSection>
+                  ) : (
+                    <FormSection title="Opportunity cost" description="Grading means giving up the chance to sell raw at this price.">
+                      <NumField label="Raw sell price today" value={rawCost} onChange={setRawCost} prefix="$" hint="what it'd sell for" />
+                    </FormSection>
                   )}
-                </div>
-              </section>
 
-              {/* Sold comps */}
-              <section>
-                <SectionHeader num="04" title="Sold Comps" />
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                  <NumField label="PSA 10 Sale Price" value={pricePSA10} onChange={setPricePSA10} prefix="$" />
-                  <NumField label="PSA 9 Sale Price" value={pricePSA9} onChange={setPricePSA9} prefix="$" />
-                  <NumField label="PSA 8 Sale Price" value={pricePSA8} onChange={setPricePSA8} prefix="$" />
-                  <NumField label="PSA ≤7 Sale Price" value={priceLower} onChange={setPriceLower} prefix="$" />
-                </div>
-                <p className="text-[10px] text-stone-500 italic mt-3 leading-relaxed">Use median of last 90 days from 130point or eBay sold listings. Avoid outlier highs.</p>
-              </section>
+                  <FormSection title="Grading & selling">
+                    <div className="space-y-3">
+                      <div>
+                        <Label>PSA service level</Label>
+                        <Select
+                          value={tierId}
+                          onChange={(e) => {
+                            const newTier = e.target.value;
+                            setTierId(newTier);
+                          }}
+                        >
+                          {PSA_TIERS.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name} — ${t.cost}
+                            </option>
+                          ))}
+                        </Select>
+                        <p className="mt-1.5 text-[12px] text-muted">
+                          Up to ${tier.maxValue.toLocaleString()} insured value · {tier.turnaround}
+                          {tier.note && <> · {tier.note}</>}
+                        </p>
+                      </div>
+                      {pricePSA10 > tier.maxValue && (
+                        <Callout tone="warn">
+                          PSA 10 price (${pricePSA10}) is above this tier's ${tier.maxValue.toLocaleString()} insured value. PSA may bump you up a tier.
+                        </Callout>
+                      )}
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField label="Batch shipping" value={shippingCost} onChange={setShippingCost} prefix="$" hint="round trip" />
+                        <NumField label="Sell fee" value={sellFeePct} onChange={setSellFeePct} suffix="%" hint="eBay ≈13%" />
+                        <NumField label="Cards in batch" value={cardsInSubmission} onChange={(v) => setCardsInSubmission(Math.max(1, Math.round(v)))} step="1" />
+                        <div className="flex flex-col justify-end">
+                          <SummaryRow label="Per card" value={`$${perCardShipping.toFixed(2)}`} />
+                        </div>
+                      </div>
+                    </div>
+                  </FormSection>
 
-              {/* Probability source */}
-              <section>
-                <SectionHeader num="05" title="Grade Probabilities" />
-                <div className="flex gap-1 mt-4 mb-4 bg-stone-900 p-1 rounded-sm border border-stone-800">
-                  <button
-                    onClick={() => setUsePopReport(true)}
-                    className={`flex-1 py-1.5 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
-                      usePopReport ? "bg-stone-800 text-amber-400" : "text-stone-500"
-                    }`}
-                  >
-                    From PSA Pop Report
-                  </button>
-                  <button
-                    onClick={() => setUsePopReport(false)}
-                    className={`flex-1 py-1.5 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
-                      !usePopReport ? "bg-stone-800 text-amber-400" : "text-stone-500"
-                    }`}
-                  >
-                    Manual Override
-                  </button>
-                </div>
-
-                {usePopReport ? (
-                  <div className="space-y-3">
+                  <FormSection title="Sold comps" description="Median of the last 90 days from 130point or eBay sold. Skip outlier highs.">
                     <div className="grid grid-cols-2 gap-3">
-                      <NumField label="Pop · PSA 10" value={popPSA10} onChange={setPopPSA10} step="1" />
-                      <NumField label="Pop · PSA 9" value={popPSA9} onChange={setPopPSA9} step="1" />
-                      <NumField label="Pop · PSA 8" value={popPSA8} onChange={setPopPSA8} step="1" />
-                      <NumField label="Pop · ≤7" value={popLower} onChange={setPopLower} step="1" />
+                      <NumField label="PSA 10" value={pricePSA10} onChange={setPricePSA10} prefix="$" />
+                      <NumField label="PSA 9" value={pricePSA9} onChange={setPricePSA9} prefix="$" />
+                      <NumField label="PSA 8" value={pricePSA8} onChange={setPricePSA8} prefix="$" />
+                      <NumField label="PSA 7 or lower" value={priceLower} onChange={setPriceLower} prefix="$" />
                     </div>
-                    <div>
-                      <NumField
-                        label="Selection Bias Haircut"
-                        value={biasHaircut}
-                        onChange={setBiasHaircut}
-                        suffix="%"
-                        hint="Default 35%"
-                      />
-                      <p className="text-[10px] text-stone-500 italic mt-2 leading-relaxed">
-                        Pop reports overstate 10-rates because submitters cherry-pick. A 35% haircut adjusts toward what a random raw eBay copy would grade.
-                      </p>
+                  </FormSection>
+
+                  <FormSection title="Grade odds">
+                    <Segmented
+                      value={usePopReport}
+                      onChange={setUsePopReport}
+                      options={[
+                        { value: true, label: "From pop report" },
+                        { value: false, label: "Set manually" },
+                      ]}
+                    />
+                    <div className="mt-4">
+                      {usePopReport ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <NumField label="Pop · PSA 10" value={popPSA10} onChange={setPopPSA10} step="1" />
+                            <NumField label="Pop · PSA 9" value={popPSA9} onChange={setPopPSA9} step="1" />
+                            <NumField label="Pop · PSA 8" value={popPSA8} onChange={setPopPSA8} step="1" />
+                            <NumField label="Pop · ≤7" value={popLower} onChange={setPopLower} step="1" />
+                          </div>
+                          <NumField label="Selection-bias haircut" value={biasHaircut} onChange={setBiasHaircut} suffix="%" hint="default 35%" />
+                          <p className="text-[12px] text-muted leading-snug">
+                            Pop reports overstate gem rates because people only submit their best copies. The haircut adjusts toward what a random raw copy would grade.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField label="PSA 10" value={manualP10} onChange={setManualP10} suffix="%" />
+                          <NumField label="PSA 9" value={manualP9} onChange={setManualP9} suffix="%" />
+                          <NumField label="PSA 8" value={manualP8} onChange={setManualP8} suffix="%" />
+                          <NumField label="PSA ≤7" value={manualPLower} onChange={setManualPLower} suffix="%" />
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <NumField label="P(PSA 10)" value={manualP10} onChange={setManualP10} suffix="%" />
-                    <NumField label="P(PSA 9)" value={manualP9} onChange={setManualP9} suffix="%" />
-                    <NumField label="P(PSA 8)" value={manualP8} onChange={setManualP8} suffix="%" />
-                    <NumField label="P(≤7)" value={manualPLower} onChange={setManualPLower} suffix="%" />
-                  </div>
-                )}
 
-                <div className={`mt-3 px-3 py-2 rounded-sm border text-[11px] font-mono flex justify-between ${
-                  probsValid ? "bg-stone-900/50 border-stone-800 text-stone-400" : "bg-rose-950/30 border-rose-900 text-rose-300"
-                }`}>
-                  <span>Probability total</span>
-                  <span>{probSum.toFixed(1)}% {probsValid ? "✓" : "(must equal 100)"}</span>
-                </div>
-
-                <div className="mt-4 p-3 bg-stone-900/50 border border-stone-800 rounded-sm">
-                  <div className="text-[9px] uppercase tracking-[0.2em] text-stone-500 mb-2">Effective probabilities used</div>
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    {[
-                      { l: "10", v: probabilities.psa10 },
-                      { l: "9",  v: probabilities.psa9  },
-                      { l: "8",  v: probabilities.psa8  },
-                      { l: "≤7", v: probabilities.psa7orLower },
-                    ].map((p) => (
-                      <div key={p.l}>
-                        <div className="text-[9px] text-stone-500 font-mono">PSA {p.l}</div>
-                        <div className="text-sm font-mono text-stone-200">{p.v.toFixed(1)}%</div>
+                    <div className="mt-5 pt-4 border-t border-line">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[13px] font-medium text-ink-2">Odds used in the model</span>
+                        {probsValid ? (
+                          <span className="inline-flex items-center gap-1 text-[12px] text-muted tabular-nums">
+                            <Check size={13} className="text-pos" /> {probSum.toFixed(1)}%
+                          </span>
+                        ) : (
+                          <Pill tone="neg">{probSum.toFixed(1)}% · must total 100</Pill>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                      <ProbabilityBar probabilities={probabilities} />
+                    </div>
+                  </FormSection>
+                </Card>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="secondary" onClick={saveToWatchlist} disabled={!cardName.trim()} title={!cardName.trim() ? "Add a description first" : ""}>
+                    <Bookmark size={15} /> Save
+                  </Button>
+                  <Button onClick={addToSubmission}>
+                    <Package size={15} /> Add to batch
+                  </Button>
                 </div>
-              </section>
-
-              {/* Save / Add */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={saveToWatchlist}
-                  disabled={!cardName.trim()}
-                  className="bg-amber-500 hover:bg-amber-400 disabled:bg-stone-800 disabled:text-stone-600 text-stone-950 disabled:cursor-not-allowed font-medium text-xs uppercase tracking-[0.2em] py-3 rounded-sm transition-colors flex items-center justify-center gap-2"
-                >
-                  <Save size={13} />
-                  To Watchlist
-                </button>
-                <button
-                  onClick={addToSubmission}
-                  className="bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-100 font-medium text-xs uppercase tracking-[0.2em] py-3 rounded-sm transition-colors flex items-center justify-center gap-2"
-                >
-                  <Package size={13} />
-                  To Submission
-                </button>
               </div>
-            </div>
 
-            {/* RIGHT: Output */}
-            <div className="space-y-6">
-              {/* Card preview */}
-              {(cardImage || cardName) && (
-                <div className="border border-stone-800 rounded-sm p-4 flex gap-4 items-center bg-stone-900/30">
-                  {cardImage && (
-                    <img src={cardImage} alt="" className="w-16 h-22 object-contain bg-stone-950 border border-stone-700 rounded-sm flex-shrink-0" style={{ height: '88px' }} />
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-medium">{ownsCard ? "Grading Decision" : "Evaluating"}</div>
-                    <div className="text-stone-100 text-base truncate">{cardName || "Untitled card"}</div>
-                    <div className="text-[10px] text-stone-500 font-mono mt-1">
-                      {ownsCard
-                        ? `${tier.cost.toFixed(2)} grade + $${shippingCost.toFixed(2)} ship · risking $${(rawCost * (1 - sellFeePct/100)).toFixed(2)} raw sell`
-                        : `$${rawCost.toFixed(2)} raw + $${(rawCost * salesTaxPct / 100).toFixed(2)} tax + $${buyShippingCost.toFixed(2)} ship + $${tier.cost} grade`}
+              {/* RIGHT: Results */}
+              <div className="space-y-4 order-first lg:order-none">
+                <Card className="overflow-hidden">
+                  <div className="p-6 sm:p-7">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {cardImage && <img src={cardImage} alt="" className="w-10 h-14 object-cover rounded-md ring-1 ring-line shrink-0" />}
+                        <div className="min-w-0">
+                          <div className="text-[13px] text-muted">{ownsCard ? "Grading decision" : "Evaluating purchase"}</div>
+                          <div className="text-[15px] font-medium text-ink truncate">{cardName || "Untitled card"}</div>
+                        </div>
+                      </div>
+                      <VerdictPill code={result.verdict} />
+                    </div>
+
+                    <div className="mt-7">
+                      <div className="text-[13px] text-muted">Expected profit per card</div>
+                      <div className={`mt-1 text-[44px] sm:text-[56px] leading-[1.05] font-semibold tracking-[-0.04em] tabular-nums ${TONE_TEXT[evToneKey]}`}>
+                        {fmtSigned$(result.ev)}
+                      </div>
+                      <p className="mt-3 text-[15px] text-ink-2 max-w-xl leading-relaxed">{verdict.blurb}</p>
+                      <p className="mt-2 text-[12px] text-faint tabular-nums leading-relaxed">{costLine}</p>
                     </div>
                   </div>
-                </div>
-              )}
-
-              {/* Verdict */}
-              <VerdictBadge ev={result.ev} sharpe={result.sharpe} probOfLoss={result.probOfLoss} />
-
-              {/* Headline metrics */}
-              <div className="border border-stone-800 rounded-sm p-6 bg-gradient-to-br from-stone-900/40 to-stone-950">
-                <div className="grid grid-cols-3 gap-6">
-                  <StatBlock
-                    label="Expected Value"
-                    value={fmt$(result.ev)}
-                    sublabel={fmt$Full(result.ev)}
-                    tone={evTone}
-                    large
-                  />
-                  <StatBlock
-                    label="ROI on Total Cost"
-                    value={fmtPct(result.roi)}
-                    sublabel={`Cost basis ${fmt$(result.totalCost)}`}
-                    tone={result.roi > 0 ? "positive" : "negative"}
-                    large
-                  />
-                  <StatBlock
-                    label="Sharpe-Like Ratio"
-                    value={result.sharpe.toFixed(2)}
-                    sublabel="EV ÷ stdev"
-                    tone={result.sharpe > 0.7 ? "positive" : result.sharpe > 0.3 ? "warning" : "negative"}
-                    large
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-6 mt-6 pt-5 border-t border-stone-800">
-                  <StatBlock
-                    label="Probability of Loss"
-                    value={fmtPct(result.probOfLoss * 100)}
-                    tone={result.probOfLoss > 0.5 ? "negative" : result.probOfLoss > 0.3 ? "warning" : "positive"}
-                  />
-                  <StatBlock
-                    label="Std. Dev of Profit"
-                    value={`±${fmt$(result.stdDev)}`}
-                    sublabel="Outcome volatility"
-                  />
-                  <StatBlock
-                    label="Break-even 10 Rate"
-                    value={result.breakEven10Rate !== null ? fmtPct(result.breakEven10Rate) : "N/A"}
-                    sublabel={result.breakEven10Rate !== null ? `Modeling ${probabilities.psa10.toFixed(1)}%` : "Profitable in all cases"}
-                    tone={
-                      result.breakEven10Rate === null
-                        ? "positive"
-                        : probabilities.psa10 > result.breakEven10Rate
-                        ? "positive"
-                        : "negative"
-                    }
-                  />
-                </div>
-              </div>
-
-              {/* Outcome distribution */}
-              <div className="border border-stone-800 rounded-sm p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <BarChart3 size={12} className="text-amber-500" />
-                    <span className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium">Profit by Outcome</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-px bg-line border-t border-line">
+                    <Stat label="Return on risk" value={fmtPct(result.roi)} sub={`on ${fmt$Full(atRisk)}`} tone={result.roi > 0 ? "pos" : "neg"} />
+                    <Stat label="Sharpe ratio" value={result.sharpe.toFixed(2)} sub="EV ÷ volatility" tone={sharpeTone(result.sharpe)} />
+                    <Stat
+                      label="Chance of loss"
+                      value={fmtPct(result.probOfLoss * 100)}
+                      tone={result.probOfLoss > 0.5 ? "neg" : result.probOfLoss > 0.3 ? "warn" : "pos"}
+                    />
+                    <Stat label="Volatility" value={`±${fmt$(result.stdDev)}`} sub="Std. dev. of profit" />
+                    <Stat
+                      label="Break-even PSA 10 rate"
+                      value={result.breakEven10Rate !== null ? fmtPct(result.breakEven10Rate) : "N/A"}
+                      sub={result.breakEven10Rate !== null ? `You're modeling ${probabilities.psa10.toFixed(1)}%` : "Profitable in every outcome"}
+                      tone={
+                        result.breakEven10Rate === null
+                          ? "pos"
+                          : probabilities.psa10 > result.breakEven10Rate
+                          ? "pos"
+                          : "neg"
+                      }
+                    />
+                    <Stat label="Expected net sale" value={fmt$Full(result.evPlusCost)} sub="after fees" />
                   </div>
-                  <div className="text-[10px] text-stone-500 font-mono">net of fees</div>
-                </div>
-                <OutcomeChart outcomes={result.outcomes} />
-                <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-stone-800 text-[10px] font-mono">
-                  <div className="text-stone-500">Raw + Grade + Ship: <span className="text-stone-300">{fmt$Full(result.totalCost)}</span></div>
-                  <div className="text-stone-500">Avg Net Sale: <span className="text-stone-300">{fmt$Full(result.evPlusCost)}</span></div>
-                  <div className="text-stone-500">Tier: <span className="text-stone-300">{tier.name} (${tier.cost})</span></div>
-                </div>
-              </div>
+                </Card>
 
-              {/* Cost waterfall + risk/reward scatter side by side */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="border border-stone-800 rounded-sm p-5">
-                  <CostWaterfall
-                    rawCost={rawCost}
-                    salesTaxPct={salesTaxPct}
-                    buyShippingCost={buyShippingCost}
-                    gradingCost={tier.cost}
-                    shippingCost={perCardShipping}
-                    sellFeePct={sellFeePct}
-                    result={result}
-                    ownsCard={ownsCard}
-                  />
-                </div>
-                <div className="border border-stone-800 rounded-sm p-5">
-                  <RiskRewardScatter outcomes={result.outcomes} />
-                </div>
-              </div>
-
-              {/* Monte Carlo */}
-              <div className="border border-stone-800 rounded-sm p-5">
-                <MonteCarloDistribution outcomes={result.outcomes} />
-              </div>
-
-              {/* Stress test */}
-              <div className="border border-stone-800 rounded-sm p-5">
-                <StressTest
-                  baseInputs={{
-                    rawCost,
-                    salesTaxPct,
-                    buyShippingCost,
-                    ownsCard,
-                    gradeProbabilities: probabilities,
-                    gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
-                    gradingCost: tier.cost,
-                    shippingCost: perCardShipping,
-                    sellFeePct,
-                  }}
-                />
+                <Card>
+                  <CardHeader title="Profit by grade" subtitle="Net of fees and all costs" right={<span className="text-[12px] text-faint">{tier.name} · ${tier.cost}</span>} />
+                  <OutcomeChart outcomes={result.outcomes} />
+                </Card>
               </div>
             </div>
-          </div>
+
+            {/* Deeper analysis */}
+            <div className="mt-14">
+              <div className="mb-5">
+                <h2 className="text-[20px] font-semibold tracking-[-0.02em]">Risk analysis</h2>
+                <p className="text-[14px] text-muted mt-1">Where the money comes from, and how wide the range of outcomes is.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CostWaterfall
+                  rawCost={rawCost}
+                  salesTaxPct={salesTaxPct}
+                  buyShippingCost={buyShippingCost}
+                  gradingCost={tier.cost}
+                  shippingCost={perCardShipping}
+                  sellFeePct={sellFeePct}
+                  result={result}
+                  ownsCard={ownsCard}
+                />
+                <RiskRewardScatter outcomes={result.outcomes} />
+                <div className="md:col-span-2">
+                  <MonteCarloDistribution outcomes={result.outcomes} />
+                </div>
+                <div className="md:col-span-2">
+                  <StressTest
+                    baseInputs={{
+                      rawCost,
+                      salesTaxPct,
+                      buyShippingCost,
+                      ownsCard,
+                      gradeProbabilities: probabilities,
+                      gradePrices: { psa10: pricePSA10, psa9: pricePSA9, psa8: pricePSA8, psa7orLower: priceLower },
+                      gradingCost: tier.cost,
+                      shippingCost: perCardShipping,
+                      sellFeePct,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </>
         )}
 
+        {/* ===================== SCANNER ===================== */}
         {activeTab === "scanner" && (
           <div>
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="font-display text-2xl font-semibold mb-1">Scanner</h2>
-                <p className="text-sm text-stone-500">Scan modern basketball &amp; football rookies and rank by expected return. Results are estimates — verify against 130point before grading.</p>
-              </div>
-              <button
-                onClick={runScan}
-                disabled={scanLoading}
-                className="bg-amber-500 hover:bg-amber-400 disabled:bg-stone-800 disabled:text-stone-600 text-stone-950 disabled:cursor-not-allowed font-medium text-xs uppercase tracking-[0.2em] py-2.5 px-4 rounded-sm transition-colors flex items-center gap-2"
-              >
-                {scanLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                {scanLoading ? "Scanning..." : (scanResults.length > 0 ? "Rescan" : "Run Scan")}
-              </button>
-            </div>
+            <PageHeader
+              title="Scanner"
+              description="Scan modern basketball and football rookies and rank them by risk-adjusted return. Results are estimates, so verify against 130point before grading."
+              actions={
+                <Button onClick={runScan} disabled={scanLoading}>
+                  {scanLoading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                  {scanLoading ? "Scanning…" : scanResults.length > 0 ? "Rescan" : "Run scan"}
+                </Button>
+              }
+            />
 
-            {/* Filters and custom card */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              {/* Sport filter */}
-              <div className="border border-stone-800 rounded-sm p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium mb-2">Filter</div>
-                <div className="flex gap-1 bg-stone-900 p-1 rounded-sm border border-stone-800">
-                  {[
-                    { id: "all", label: "All" },
-                    { id: "basketball", label: "Basketball" },
-                    { id: "football", label: "Football" },
-                  ].map(({ id, label }) => (
-                    <button
-                      key={id}
-                      onClick={() => setScanFilter(id)}
-                      className={`flex-1 py-1.5 text-[10px] uppercase tracking-[0.15em] font-medium rounded-sm transition-colors ${
-                        scanFilter === id ? "bg-stone-800 text-amber-400" : "text-stone-500 hover:text-stone-300"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-3 text-[10px] text-stone-500 italic leading-relaxed">
-                  Click "Run Scan" above to fetch current eBay prices for cards in this category.
-                </div>
+            <Card className="p-4 mb-4 flex flex-col md:flex-row gap-3 md:items-center">
+              <div className="md:w-[340px] shrink-0">
+                <Segmented
+                  value={scanFilter}
+                  onChange={setScanFilter}
+                  options={[
+                    { value: "all", label: "All" },
+                    { value: "basketball", label: "Basketball" },
+                    { value: "football", label: "Football" },
+                  ]}
+                />
               </div>
-
-              {/* Custom card scan */}
-              <div className="border border-stone-800 rounded-sm p-4">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium mb-2">Add Custom Card</div>
-                <div className="flex gap-2">
+              <div className="flex gap-2 flex-1">
+                <div className="relative flex-1">
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint pointer-events-none" />
                   <input
                     type="text"
                     value={customQuery}
                     onChange={(e) => setCustomQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && scanCustomCard()}
-                    placeholder="e.g. 2023 Prizm CJ Stroud 339"
-                    className="flex-1 bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none placeholder:text-stone-600"
+                    placeholder="Scan a specific card, e.g. 2023 Prizm CJ Stroud 339"
+                    className={`${inputCls} pl-9 pr-3`}
                   />
-                  <button
-                    onClick={scanCustomCard}
-                    disabled={customScanLoading || !customQuery.trim()}
-                    className="bg-stone-800 hover:bg-stone-700 disabled:bg-stone-900 disabled:text-stone-600 border border-stone-700 text-stone-100 text-xs uppercase tracking-wider px-3 rounded-sm flex items-center gap-2"
-                  >
-                    {customScanLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-                    Scan
-                  </button>
                 </div>
-                <div className="mt-3 text-[10px] text-stone-500 italic leading-relaxed">
-                  Type a card description and we'll add it to your results.
-                </div>
+                <Button variant="secondary" onClick={scanCustomCard} disabled={customScanLoading || !customQuery.trim()}>
+                  {customScanLoading && <Loader2 size={14} className="animate-spin" />}
+                  Scan
+                </Button>
               </div>
-            </div>
+            </Card>
 
-            {/* Error state */}
             {scanError && (
-              <div className="mb-6 px-4 py-3 bg-rose-950/30 border border-rose-900/40 rounded-sm text-[11px] text-rose-300 leading-relaxed">
-                <div className="font-medium mb-1">Scanner error</div>
-                <div className="font-mono text-[10px] opacity-80">{scanError}</div>
+              <div className="mb-4">
+                <Callout tone="neg">
+                  <div className="font-medium">The scanner hit an error</div>
+                  <div className="opacity-80 mt-0.5">{scanError}</div>
+                </Callout>
               </div>
             )}
 
-            {/* Status bar */}
             {scanLastUpdated && (
-              <div className="mb-4 flex items-center justify-between text-[10px] text-stone-500 font-mono">
-                <span>Last scan: {new Date(scanLastUpdated).toLocaleString()}</span>
-                <span>{scanResults.filter((r) => r.status === "ok").length} valid · {scanResults.filter((r) => r.status !== "ok").length} skipped</span>
+              <div className="mb-3 flex items-center justify-between text-[12px] text-muted tabular-nums">
+                <span>Updated {new Date(scanLastUpdated).toLocaleString()}</span>
+                <span>{okScans.length} priced · {skippedScans.length} skipped</span>
               </div>
             )}
 
-            {/* Results table */}
             {scanResults.length === 0 ? (
-              <div className="border border-dashed border-stone-800 rounded-sm py-16 text-center">
-                <Radar className="mx-auto text-stone-700 mb-3" size={32} />
-                <div className="text-stone-500 text-sm">No scan results yet.</div>
-                <div className="text-stone-600 text-xs mt-1">Click "Run Scan" above to fetch current eBay prices.</div>
-              </div>
+              <EmptyState
+                icon={Radar}
+                title="No scan results yet"
+                description="Run a scan to pull current eBay prices and rank cards by expected return."
+                action={<Button variant="secondary" onClick={runScan} disabled={scanLoading}><RefreshCw size={15} /> Run scan</Button>}
+              />
             ) : (
-              <div className="border border-stone-800 rounded-sm overflow-hidden">
-                <div className="grid grid-cols-[2fr_repeat(6,1fr)_60px] gap-3 px-4 py-2 bg-stone-900 text-[10px] uppercase tracking-[0.15em] text-stone-500 font-medium">
-                  <div>Card</div>
-                  <div className="text-right">Raw $</div>
-                  <div className="text-right">PSA 9 $</div>
-                  <div className="text-right">PSA 10 $</div>
-                  <div className="text-right">EV</div>
-                  <div className="text-right">Sharpe</div>
-                  <div className="text-right">Verdict</div>
-                  <div></div>
-                </div>
-                {[...scanResults]
-                  .filter((r) => r.status === "ok")
-                  .sort((a, b) => (b.sharpe || 0) - (a.sharpe || 0))
-                  .map((r) => (
-                    <div key={r.id} className="grid grid-cols-[2fr_repeat(6,1fr)_60px] gap-3 px-4 py-2.5 border-t border-stone-800 hover:bg-stone-900/50 transition-colors items-center text-sm">
+              <>
+                <Table
+                  cols="minmax(0,2.2fr) repeat(6,minmax(0,1fr)) 72px"
+                  minWidth={880}
+                  head={
+                    <>
+                      <div>Card</div>
+                      <div className="text-right">Raw</div>
+                      <div className="text-right">PSA 9</div>
+                      <div className="text-right">PSA 10</div>
+                      <div className="text-right">EV</div>
+                      <div className="text-right">Sharpe</div>
+                      <div className="text-right">Verdict</div>
+                      <div />
+                    </>
+                  }
+                >
+                  {okScans.map((r) => (
+                    <Row key={r.id} cols="minmax(0,2.2fr) repeat(6,minmax(0,1fr)) 72px" className="group">
                       <div className="min-w-0">
-                        <div className="text-stone-100 font-medium truncate">{r.player}</div>
-                        <div className="text-[10px] text-stone-500 font-mono">{r.year} {r.set} {r.cardNumber && `#${r.cardNumber}`} · {r.sport}</div>
+                        <div className="text-ink font-medium truncate">{r.player}</div>
+                        <div className="text-[12px] text-muted truncate">
+                          {r.year} {r.set} {r.cardNumber && `#${r.cardNumber}`} · <span className="capitalize">{r.sport}</span>
+                        </div>
                       </div>
-                      <div className="text-right font-mono text-stone-300">${r.prices?.raw?.median?.toFixed(0) || "—"}</div>
-                      <div className="text-right font-mono text-stone-300">${r.prices?.psa9?.median?.toFixed(0) || "—"}</div>
-                      <div className="text-right font-mono text-stone-300">${r.prices?.psa10?.median?.toFixed(0) || "—"}</div>
-                      <div className={`text-right font-mono ${r.ev > 0 ? "text-emerald-400" : "text-rose-400"}`}>{r.ev > 0 ? "+" : ""}${r.ev?.toFixed(0)}</div>
-                      <div className={`text-right font-mono ${r.sharpe > 0.7 ? "text-emerald-400" : r.sharpe > 0.3 ? "text-amber-400" : "text-rose-400"}`}>{r.sharpe?.toFixed(2)}</div>
-                      <div className={`text-right text-[10px] font-mono uppercase tracking-wider ${
-                        r.verdict === "STRONG_BUY" ? "text-emerald-300" :
-                        r.verdict === "FAVORABLE" ? "text-emerald-400" :
-                        r.verdict === "MARGINAL" ? "text-stone-300" :
-                        r.verdict === "HIGH_RISK" ? "text-amber-400" :
-                        "text-rose-400"
-                      }`}>{r.verdict?.replace("_", " ")}</div>
-                      <button
-                        onClick={() => loadIntoCalculator(r)}
-                        className="text-stone-600 hover:text-amber-400 text-[10px] uppercase tracking-wider transition-colors"
-                        title="Load into calculator"
-                      >
-                        Open →
-                      </button>
-                    </div>
+                      <div className="text-right tabular-nums text-ink-2">${r.prices?.raw?.median?.toFixed(0) || "—"}</div>
+                      <div className="text-right tabular-nums text-ink-2">${r.prices?.psa9?.median?.toFixed(0) || "—"}</div>
+                      <div className="text-right tabular-nums text-ink-2">${r.prices?.psa10?.median?.toFixed(0) || "—"}</div>
+                      <div className={`text-right tabular-nums font-medium ${r.ev > 0 ? "text-pos" : "text-neg"}`}>{r.ev > 0 ? "+" : ""}${r.ev?.toFixed(0)}</div>
+                      <div className={`text-right tabular-nums ${TONE_TEXT[sharpeTone(r.sharpe)]}`}>{r.sharpe?.toFixed(2)}</div>
+                      <div className="text-right"><VerdictPill code={r.verdict} /></div>
+                      <div className="text-right">
+                        <Button variant="ghost" size="sm" className="px-2" onClick={() => loadIntoCalculator(r)} title="Load into calculator">
+                          Open <ArrowUpRight size={14} />
+                        </Button>
+                      </div>
+                    </Row>
                   ))}
-                {/* Skipped cards section */}
-                {scanResults.some((r) => r.status !== "ok") && (
-                  <div className="border-t-2 border-stone-700">
-                    <div className="px-4 py-2 bg-stone-900/50 text-[10px] uppercase tracking-[0.15em] text-stone-500 font-medium">
-                      Skipped ({scanResults.filter((r) => r.status !== "ok").length})
-                    </div>
-                    {scanResults.filter((r) => r.status !== "ok").map((r) => (
-                      <div key={r.id} className="grid grid-cols-[2fr_2fr] gap-3 px-4 py-2 border-t border-stone-800 text-xs">
-                        <div className="text-stone-400 truncate">{r.player} <span className="text-[10px] text-stone-600">({r.year} {r.set})</span></div>
-                        <div className="text-[10px] text-stone-500 italic truncate">{r.note}</div>
-                      </div>
-                    ))}
-                  </div>
+                </Table>
+
+                {skippedScans.length > 0 && (
+                  <details className="mt-4 group">
+                    <summary className="cursor-pointer text-[13px] text-muted hover:text-ink select-none list-none inline-flex items-center gap-1">
+                      <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+                      {skippedScans.length} skipped {skippedScans.length === 1 ? "card" : "cards"}
+                    </summary>
+                    <Card className="mt-2 divide-y divide-line">
+                      {skippedScans.map((r) => (
+                        <div key={r.id} className="flex items-center justify-between gap-4 px-5 py-2.5 text-[13px]">
+                          <div className="text-ink-2 truncate">
+                            {r.player} <span className="text-faint">· {r.year} {r.set}</span>
+                          </div>
+                          <div className="text-muted truncate text-right">{r.note}</div>
+                        </div>
+                      ))}
+                    </Card>
+                  </details>
                 )}
-              </div>
+              </>
             )}
 
-            {/* Notes */}
-            <div className="mt-6 px-4 py-3 bg-stone-900/30 border border-stone-800 rounded-sm text-[11px] text-stone-400 leading-relaxed">
-              <div className="font-medium text-stone-300 mb-1">How the scanner works</div>
-              <p className="mb-1">For each card, the scanner pulls current eBay listings for raw, PSA 9, and PSA 10 versions. Median prices are discounted ~18% to estimate sold prices (active listings tend to be priced higher than actuals).</p>
-              <p>EV uses default probabilities (P10: 18%, P9: 55%, P8: 22%, lower: 5%). For accurate per-card analysis, click "Open →" to load the card into the Calculator and refine pop data and tier.</p>
+            <div className="mt-8 max-w-3xl text-[13px] text-muted leading-relaxed space-y-2">
+              <div className="text-[14px] font-medium text-ink">How the scanner works</div>
+              <p>For each card, the scanner pulls current eBay listings for raw, PSA 9 and PSA 10 copies. Median asking prices are discounted about 18% to approximate sold prices, since active listings run higher than what actually sells.</p>
+              <p>EV uses default grade odds (PSA 10: 18%, PSA 9: 55%, PSA 8: 22%, lower: 5%). For a precise read, open a card in the calculator and enter its real pop data and service level.</p>
             </div>
           </div>
         )}
 
+        {/* ===================== SUBMISSION ===================== */}
         {activeTab === "submission" && (
           <div>
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="font-display text-2xl font-semibold mb-1">Submission Builder</h2>
-                <p className="text-sm text-stone-500">Build a batch, see the aggregate EV and per-card breakdown. Shipping divides across all cards.</p>
-              </div>
-              {submission.length > 0 && (
-                <button
-                  onClick={clearSubmission}
-                  className="text-[10px] text-stone-500 hover:text-rose-400 uppercase tracking-[0.18em] flex items-center gap-1 mt-2"
-                >
-                  <X size={12} /> Clear All
-                </button>
-              )}
-            </div>
+            <PageHeader
+              title="Submission builder"
+              description="Build a batch and see the combined expected value. Return shipping is split across every card."
+              actions={
+                submission.length > 0 && (
+                  <Button variant="danger" size="sm" onClick={clearSubmission}>
+                    <X size={14} /> Clear all
+                  </Button>
+                )
+              }
+            />
 
-            {/* Submission settings */}
-            <div className="border border-stone-800 rounded-sm p-4 mb-6">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-stone-400 font-medium mb-3">Submission Settings</div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Card className="p-5 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400 font-medium mb-1.5">PSA Tier</div>
-                  <select
-                    value={submissionTier}
-                    onChange={(e) => updateSubmissionSetting("tier", e.target.value)}
-                    className="w-full bg-stone-900 border border-stone-700 text-stone-100 text-sm py-2 px-3 rounded-sm focus:border-amber-500 focus:outline-none"
-                  >
+                  <Label>PSA service level</Label>
+                  <Select value={submissionTier} onChange={(e) => updateSubmissionSetting("tier", e.target.value)}>
                     {PSA_TIERS.map((t) => (
                       <option key={t.id} value={t.id}>{t.name} — ${t.cost}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
                 <NumField
-                  label="Round-Trip Shipping (Batch)"
+                  label="Round-trip shipping"
                   value={submissionShipping}
                   onChange={(v) => updateSubmissionSetting("shipping", v)}
                   prefix="$"
-                  hint={submission.length > 0 ? `÷${submission.length} = $${submissionResults.perCardShip.toFixed(2)}/card` : "for entire batch"}
+                  hint={submission.length > 0 ? `$${submissionResults.perCardShip.toFixed(2)} per card` : "whole batch"}
                 />
                 <NumField
-                  label="Sell Fee"
+                  label="Sell fee"
                   value={submissionSellFee}
                   onChange={(v) => updateSubmissionSetting("sellFee", v)}
                   suffix="%"
                   hint="eBay ≈13%"
                 />
               </div>
-              {submissionTier === "valuebulk" && submission.length < 20 && submission.length > 0 && (
-                <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
-                  <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
-                  <span>Value Bulk requires 20+ cards. You have {submission.length}.</span>
-                </div>
-              )}
-            </div>
+            </Card>
 
             {submission.length === 0 ? (
-              <div className="border border-dashed border-stone-800 rounded-sm py-16 text-center">
-                <Package className="mx-auto text-stone-700 mb-3" size={32} />
-                <div className="text-stone-500 text-sm">No cards in this submission yet.</div>
-                <div className="text-stone-600 text-xs mt-1">Use the Calculator tab, then click "To Submission" to add cards here.</div>
-              </div>
+              <EmptyState
+                icon={Package}
+                title="This batch is empty"
+                description="Evaluate a card in the calculator, then choose “Add to batch” to see it here."
+                action={<Button variant="secondary" onClick={() => setActiveTab("input")}>Open calculator</Button>}
+              />
             ) : (
               <>
-                {/* Aggregate stats */}
-                <div className="border border-stone-800 rounded-sm p-6 mb-6 bg-gradient-to-br from-stone-900/40 to-stone-950">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-stone-500 font-medium mb-4">Batch Totals · {submission.length} cards</div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                    <StatBlock
-                      label="Total Expected Value"
-                      value={fmt$(submissionResults.totalEV)}
-                      sublabel={fmt$Full(submissionResults.totalEV)}
-                      tone={submissionResults.totalEV > 0 ? "positive" : "negative"}
-                      large
-                    />
-                    <StatBlock
-                      label="Batch ROI"
-                      value={fmtPct(submissionResults.aggROI)}
-                      sublabel={`Cost ${fmt$(submissionResults.totalCost)}`}
-                      tone={submissionResults.aggROI > 0 ? "positive" : "negative"}
-                      large
-                    />
-                    <StatBlock
-                      label="Aggregate Sharpe"
-                      value={submissionResults.aggSharpe.toFixed(2)}
-                      sublabel="risk-adjusted"
-                      tone={submissionResults.aggSharpe > 0.7 ? "positive" : submissionResults.aggSharpe > 0.3 ? "warning" : "negative"}
-                      large
-                    />
-                    <StatBlock
-                      label="Avg P(Loss)"
+                <Card className="overflow-hidden mb-6">
+                  <div className="px-5 pt-5 pb-1 text-[13px] text-muted">
+                    Batch totals · {submission.length} {submission.length === 1 ? "card" : "cards"}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-line border-t border-line mt-4">
+                    <Stat label="Total expected value" value={fmtSigned$(submissionResults.totalEV)} tone={submissionResults.totalEV > 0 ? "pos" : "neg"} />
+                    <Stat label="Batch return" value={fmtPct(submissionResults.aggROI)} sub={`on ${fmt$Full(submissionResults.totalCost)}`} tone={submissionResults.aggROI > 0 ? "pos" : "neg"} />
+                    <Stat label="Batch Sharpe" value={submissionResults.aggSharpe.toFixed(2)} sub="risk-adjusted" tone={sharpeTone(submissionResults.aggSharpe)} />
+                    <Stat
+                      label="Avg. chance of loss"
                       value={fmtPct(submissionResults.avgProbLoss * 100)}
-                      sublabel="per card avg"
-                      tone={submissionResults.avgProbLoss > 0.5 ? "negative" : submissionResults.avgProbLoss > 0.3 ? "warning" : "positive"}
-                      large
+                      sub="per card"
+                      tone={submissionResults.avgProbLoss > 0.5 ? "neg" : submissionResults.avgProbLoss > 0.3 ? "warn" : "pos"}
                     />
                   </div>
-                </div>
+                </Card>
 
-                {/* Per-card breakdown */}
-                <div className="border border-stone-800 rounded-sm overflow-hidden">
-                  <div className="grid grid-cols-[44px_2fr_repeat(4,1fr)_40px] gap-3 px-4 py-3 bg-stone-900 text-[10px] uppercase tracking-[0.15em] text-stone-500 font-medium">
-                    <div></div>
-                    <div>Card</div>
-                    <div className="text-right">Raw $</div>
-                    <div className="text-right">EV</div>
-                    <div className="text-right">ROI</div>
-                    <div className="text-right">Verdict</div>
-                    <div></div>
-                  </div>
+                <Table
+                  cols="minmax(0,2.4fr) repeat(4,minmax(0,1fr)) 40px"
+                  minWidth={720}
+                  head={
+                    <>
+                      <div>Card</div>
+                      <div className="text-right">Raw</div>
+                      <div className="text-right">EV</div>
+                      <div className="text-right">Return</div>
+                      <div className="text-right">Verdict</div>
+                      <div />
+                    </>
+                  }
+                >
                   {[...submissionResults.cardResults]
                     .sort((a, b) => (b.result.sharpe || 0) - (a.result.sharpe || 0))
                     .map((c) => {
                       const isDrag = c.result.ev < 0;
                       return (
-                        <div key={c.id} className={`grid grid-cols-[44px_2fr_repeat(4,1fr)_40px] gap-3 px-4 py-3 border-t border-stone-800 hover:bg-stone-900/50 transition-colors items-center text-sm ${isDrag ? "bg-rose-950/10" : ""}`}>
-                          {c.image ? (
-                            <img src={c.image} alt="" className="w-10 h-14 object-cover bg-stone-800 border border-stone-700 rounded-sm" />
-                          ) : (
-                            <div className="w-10 h-14 bg-stone-900 border border-stone-800 rounded-sm" />
-                          )}
-                          <div className="min-w-0">
-                            <div className="text-stone-100 font-medium truncate">{c.name}</div>
-                            <div className="text-[10px] text-stone-500 font-mono">
-                              {c.ownsCard ? "Already own" : "Buying"} · P(10) {c.pPSA10.toFixed(0)}%
+                        <Row key={c.id} cols="minmax(0,2.4fr) repeat(4,minmax(0,1fr)) 40px" className={isDrag ? "bg-neg/[0.04]" : ""}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Thumb src={c.image} />
+                            <div className="min-w-0">
+                              <div className="text-ink font-medium truncate">{c.name}</div>
+                              <div className="text-[12px] text-muted tabular-nums">
+                                {c.ownsCard ? "Already own" : "Buying"} · PSA 10 odds {c.pPSA10.toFixed(0)}%
+                              </div>
                             </div>
                           </div>
-                          <div className="text-right font-mono text-stone-300">{fmt$Full(c.rawCost)}</div>
-                          <div className={`text-right font-mono ${c.result.ev > 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmt$Full(c.result.ev)}</div>
-                          <div className={`text-right font-mono ${c.result.roi_pct > 0 || c.result.roi > 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmtPct(c.result.roi)}</div>
-                          <div className={`text-right text-[10px] font-mono uppercase tracking-wider ${
-                            c.result.verdict === "STRONG_BUY" ? "text-emerald-300" :
-                            c.result.verdict === "FAVORABLE" ? "text-emerald-400" :
-                            c.result.verdict === "MARGINAL" ? "text-stone-300" :
-                            c.result.verdict === "HIGH_RISK" ? "text-amber-400" :
-                            "text-rose-400"
-                          }`}>{c.result.verdict.replace("_", " ")}</div>
-                          <button
-                            onClick={() => removeFromSubmission(c.id)}
-                            className="text-stone-600 hover:text-rose-400 transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                          <div className="text-right tabular-nums text-ink-2">{fmt$Full(c.rawCost)}</div>
+                          <div className={`text-right tabular-nums font-medium ${c.result.ev > 0 ? "text-pos" : "text-neg"}`}>{fmtSigned$(c.result.ev)}</div>
+                          <div className={`text-right tabular-nums ${c.result.roi > 0 ? "text-pos" : "text-neg"}`}>{fmtPct(c.result.roi)}</div>
+                          <div className="text-right"><VerdictPill code={c.result.verdict} /></div>
+                          <IconButton label="Remove from batch" onClick={() => removeFromSubmission(c.id)}>
+                            <Trash2 size={15} />
+                          </IconButton>
+                        </Row>
                       );
                     })}
-                </div>
+                </Table>
 
-                {/* Hint about drags */}
                 {submissionResults.cardResults.some((c) => c.result.ev < 0) && (
-                  <div className="mt-4 px-4 py-3 bg-rose-950/20 border border-rose-900/40 rounded-sm text-[11px] text-rose-300/80 leading-relaxed">
-                    Cards highlighted in red are <strong>dragging down the batch</strong> (negative EV). Removing them improves total expected return.
+                  <div className="mt-4">
+                    <Callout tone="neg">
+                      Highlighted cards have negative EV and are dragging the batch down. Removing them raises your total expected return.
+                    </Callout>
                   </div>
                 )}
               </>
@@ -1861,145 +1798,154 @@ export default function CardGradingEV() {
           </div>
         )}
 
+        {/* ===================== WATCHLIST ===================== */}
         {activeTab === "watchlist" && (
           <div>
-            <div className="mb-6">
-              <h2 className="font-display text-2xl font-semibold mb-1">Watchlist</h2>
-              <p className="text-sm text-stone-500">Saved evaluations, ranked by Sharpe ratio. Higher = better risk-adjusted return.</p>
-            </div>
+            <PageHeader title="Watchlist" description="Saved evaluations, ranked by Sharpe ratio. Higher means a better return for the risk." />
             {watchlist.length === 0 ? (
-              <div className="border border-dashed border-stone-800 rounded-sm py-16 text-center">
-                <BarChart3 className="mx-auto text-stone-700 mb-3" size={32} />
-                <div className="text-stone-500 text-sm">No saved evaluations yet.</div>
-                <div className="text-stone-600 text-xs mt-1">Run a calculation and click "Save to Watchlist."</div>
-              </div>
+              <EmptyState
+                icon={Bookmark}
+                title="Nothing saved yet"
+                description="Evaluate a card in the calculator and choose “Save” to keep it here."
+                action={<Button variant="secondary" onClick={() => setActiveTab("input")}>Open calculator</Button>}
+              />
             ) : (
-              <div className="border border-stone-800 rounded-sm overflow-hidden">
-                <div className="grid grid-cols-[2fr_repeat(5,1fr)_40px] gap-3 px-4 py-3 bg-stone-900 text-[10px] uppercase tracking-[0.15em] text-stone-500 font-medium">
-                  <div>Card</div>
-                  <div className="text-right">Raw $</div>
-                  <div className="text-right">EV</div>
-                  <div className="text-right">ROI</div>
-                  <div className="text-right">P(Loss)</div>
-                  <div className="text-right">Sharpe</div>
-                  <div></div>
-                </div>
+              <Table
+                cols="minmax(0,2.4fr) repeat(5,minmax(0,1fr)) 40px"
+                minWidth={780}
+                head={
+                  <>
+                    <div>Card</div>
+                    <div className="text-right">Raw</div>
+                    <div className="text-right">EV</div>
+                    <div className="text-right">Return</div>
+                    <div className="text-right">Chance of loss</div>
+                    <div className="text-right">Sharpe</div>
+                    <div />
+                  </>
+                }
+              >
                 {[...watchlist].sort((a, b) => b.sharpe - a.sharpe).map((w) => (
-                  <div key={w.id} className="grid grid-cols-[2fr_repeat(5,1fr)_40px] gap-3 px-4 py-3 border-t border-stone-800 hover:bg-stone-900/50 transition-colors items-center text-sm">
-                    <div className="flex items-center gap-3">
-                      {w.image ? (
-                        <img src={w.image} alt="" className="w-10 h-14 object-cover bg-stone-800 border border-stone-700 rounded-sm flex-shrink-0" />
-                      ) : (
-                        <div className="w-10 h-14 bg-stone-900 border border-stone-800 rounded-sm flex-shrink-0" />
-                      )}
+                  <Row key={w.id} cols="minmax(0,2.4fr) repeat(5,minmax(0,1fr)) 40px">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Thumb src={w.image} />
                       <div className="min-w-0">
-                        <div className="text-stone-100 font-medium truncate">{w.name}</div>
-                        <div className="text-[10px] text-stone-500 font-mono">{w.tier} · {new Date(w.timestamp).toLocaleDateString()}</div>
+                        <div className="text-ink font-medium truncate">{w.name}</div>
+                        <div className="text-[12px] text-muted">{w.tier} · {new Date(w.timestamp).toLocaleDateString()}</div>
                       </div>
                     </div>
-                    <div className="text-right font-mono text-stone-300">{fmt$Full(w.rawCost)}</div>
-                    <div className={`text-right font-mono ${w.ev > 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmt$Full(w.ev)}</div>
-                    <div className={`text-right font-mono ${w.roi > 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmtPct(w.roi)}</div>
-                    <div className="text-right font-mono text-stone-300">{fmtPct(w.probOfLoss * 100)}</div>
-                    <div className={`text-right font-mono ${w.sharpe > 0.7 ? "text-emerald-400" : w.sharpe > 0.3 ? "text-amber-400" : "text-rose-400"}`}>{w.sharpe.toFixed(2)}</div>
-                    <button
-                      onClick={() => removeFromWatchlist(w.id)}
-                      className="text-stone-600 hover:text-rose-400 transition-colors"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                    <div className="text-right tabular-nums text-ink-2">{fmt$Full(w.rawCost)}</div>
+                    <div className={`text-right tabular-nums font-medium ${w.ev > 0 ? "text-pos" : "text-neg"}`}>{fmtSigned$(w.ev)}</div>
+                    <div className={`text-right tabular-nums ${w.roi > 0 ? "text-pos" : "text-neg"}`}>{fmtPct(w.roi)}</div>
+                    <div className="text-right tabular-nums text-ink-2">{fmtPct(w.probOfLoss * 100)}</div>
+                    <div className={`text-right tabular-nums ${TONE_TEXT[sharpeTone(w.sharpe)]}`}>{w.sharpe.toFixed(2)}</div>
+                    <IconButton label="Remove" onClick={() => removeFromWatchlist(w.id)}>
+                      <Trash2 size={15} />
+                    </IconButton>
+                  </Row>
                 ))}
-              </div>
+              </Table>
             )}
           </div>
         )}
 
+        {/* ===================== METHOD ===================== */}
         {activeTab === "guide" && (
-          <div className="max-w-3xl space-y-8">
-            <div>
-              <h2 className="font-display text-3xl font-semibold mb-3">The Method</h2>
-              <p className="text-stone-400 leading-relaxed">
-                This tool computes the risk-adjusted expected value of buying a raw card and submitting it for PSA grading. It's not a crystal ball — it's a discipline that forces every assumption into the open so you can argue with the math instead of your gut.
-              </p>
+          <article className="max-w-2xl">
+            <PageHeader
+              title="The method"
+              description="Cardstack computes the risk-adjusted expected value of grading a card. It isn't a crystal ball. It forces every assumption into the open so you can argue with the math instead of your gut."
+            />
+
+            <div className="space-y-10 text-[15px] text-ink-2 leading-relaxed">
+              <Section title="The core equation">
+                <p>For each possible grade outcome <em>i</em>:</p>
+                <div className="my-4 rounded-lg bg-subtle ring-1 ring-line px-4 py-3 font-mono text-[13px] text-ink overflow-x-auto">
+                  EV = Σ P(grade<sub>i</sub>) × [Price<sub>i</sub> × (1 − fee%)] − Raw − Grading − Shipping
+                </div>
+                <p>
+                  Positive EV is necessary but not sufficient. A coin flip with $1,000 of upside and $500 of downside has +$250 EV, but it's dangerous to size up unless you can run it many times.
+                </p>
+              </Section>
+
+              <Section title="Why the bias haircut matters">
+                <p>
+                  The PSA pop report shows the gem rate among <em className="text-ink not-italic font-medium">cards people chose to submit</em>. Submitters pre-screen, so they don't send rough copies. The gem rate among <em className="text-ink not-italic font-medium">random raw eBay copies</em> is meaningfully lower. The default 35% haircut is a starting point. If you have your own grading history, replace it with your observed difference.
+                </p>
+              </Section>
+
+              <Section title="Reading the Sharpe ratio">
+                <p className="mb-4">The Sharpe ratio divides expected profit by the standard deviation of profit across outcomes. Rough guide:</p>
+                <Card className="divide-y divide-line">
+                  {[
+                    { range: "Below 0.3", tone: "neg", text: "A coin flip with a marginal edge. Pass unless you have many shots." },
+                    { range: "0.3 – 0.7", tone: "warn", text: "Workable but thin. Verify comps and watch fees." },
+                    { range: "0.7 – 1.5", tone: "pos", text: "Solid. Most good submissions live here." },
+                    { range: "Above 1.5", tone: "pos", text: "Suspiciously good. Recheck inputs, you may have a stale comp." },
+                  ].map((r) => (
+                    <div key={r.range} className="flex gap-4 px-4 py-3 text-[14px]">
+                      <span className={`w-20 shrink-0 font-medium tabular-nums ${TONE_TEXT[r.tone]}`}>{r.range}</span>
+                      <span className="text-ink-2">{r.text}</span>
+                    </div>
+                  ))}
+                </Card>
+              </Section>
+
+              <Section title="What this doesn't model">
+                <ul className="space-y-3">
+                  {[
+                    ["Time value of money.", "A $200 EV that takes six months ties up capital. Discount accordingly."],
+                    ["Liquidity.", "Some PSA 10s sit for months. EV assumes you can sell at the comp."],
+                    ["Player and set drift.", "A slab that comes back in four months may face a different market than the one you priced."],
+                    ["Card condition.", "Grade odds assume an average raw copy. Inspect the actual card."],
+                  ].map(([b, t]) => (
+                    <li key={b} className="flex gap-3">
+                      <span className="mt-[10px] w-1 h-1 rounded-full bg-faint shrink-0" />
+                      <span><strong className="text-ink font-medium">{b}</strong> {t}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+
+              <Section title="Recommended workflow">
+                <ol className="space-y-3">
+                  {[
+                    "Pull median 90-day sold comps for each grade from 130point or eBay sold listings.",
+                    "Pull current pop counts from psacard.com/pop for the exact card variant.",
+                    "Use a 30–40% bias haircut by default. Tighten it for cards you can inspect in hand.",
+                    "Skip anything below a 0.5 Sharpe unless you have a specific thesis, like a player breakout.",
+                    "Re-run the numbers on the day you submit. Comps move.",
+                  ].map((t, i) => (
+                    <li key={i} className="flex gap-3">
+                      <span className="w-6 h-6 shrink-0 rounded-full bg-subtle ring-1 ring-line grid place-items-center text-[12px] font-medium text-ink tabular-nums">{i + 1}</span>
+                      <span className="pt-0.5">{t}</span>
+                    </li>
+                  ))}
+                </ol>
+              </Section>
             </div>
-
-            <Section title="The core equation">
-              <p className="text-stone-400 leading-relaxed mb-3">
-                For each possible grade outcome <span className="font-mono text-amber-400">i</span>:
-              </p>
-              <div className="bg-stone-900 border-l-2 border-amber-500 px-4 py-3 my-3 font-mono text-xs text-stone-300">
-                EV = Σ P(grade<sub>i</sub>) × [Price<sub>i</sub> × (1 − fee%)] − Raw − Grading − Shipping
-              </div>
-              <p className="text-stone-400 leading-relaxed">
-                Positive EV is necessary but not sufficient. A coin flip with $1,000 upside and −$500 downside has +$250 EV but is dangerous to size up unless you can run it many times.
-              </p>
-            </Section>
-
-            <Section title="Why the bias haircut matters">
-              <p className="text-stone-400 leading-relaxed">
-                The PSA pop report tells you the 10-rate among <em className="text-stone-300">cards people chose to submit</em>. Submitters pre-screen — they don't send rough copies. The 10-rate among <em className="text-stone-300">random raw eBay copies</em> is meaningfully lower. The default 35% haircut is a starting heuristic; if you have personal grading data, replace it with your own observed delta.
-              </p>
-            </Section>
-
-            <Section title="What Sharpe ratio means here">
-              <p className="text-stone-400 leading-relaxed mb-2">
-                The "Sharpe-like" ratio divides expected profit by the standard deviation of profit across outcomes. Rough heuristics:
-              </p>
-              <ul className="space-y-1.5 text-sm text-stone-400 font-mono">
-                <li><span className="text-rose-400">&lt; 0.3</span> · Coin flip with marginal edge — pass unless you have many shots</li>
-                <li><span className="text-amber-400">0.3 – 0.7</span> · Workable but thin. Verify comps, watch fees</li>
-                <li><span className="text-emerald-400">0.7 – 1.5</span> · Solid. Most "good" submissions live here</li>
-                <li><span className="text-emerald-300">&gt; 1.5</span> · Suspicious. Recheck inputs — you may have a stale comp</li>
-              </ul>
-            </Section>
-
-            <Section title="What this tool doesn't model">
-              <ul className="space-y-2 text-sm text-stone-400 list-none pl-0">
-                <li className="flex gap-2"><ChevronRight size={14} className="text-amber-500 mt-1 flex-shrink-0" /><span><strong className="text-stone-300">Time value of money.</strong> A $200 EV that takes 6 months ties up capital. Discount accordingly.</span></li>
-                <li className="flex gap-2"><ChevronRight size={14} className="text-amber-500 mt-1 flex-shrink-0" /><span><strong className="text-stone-300">Liquidity.</strong> Some PSA 10s sit for months. EV assumes you can sell at the comp.</span></li>
-                <li className="flex gap-2"><ChevronRight size={14} className="text-amber-500 mt-1 flex-shrink-0" /><span><strong className="text-stone-300">Player/set drift.</strong> A graded card that emerges in 4 months may face a different market than the one you priced.</span></li>
-                <li className="flex gap-2"><ChevronRight size={14} className="text-amber-500 mt-1 flex-shrink-0" /><span><strong className="text-stone-300">Card condition.</strong> P(10) is conditioned on a hypothetical "average" raw copy. Inspect the actual card.</span></li>
-              </ul>
-            </Section>
-
-            <Section title="Recommended workflow">
-              <ol className="space-y-2 text-sm text-stone-400 list-decimal pl-5">
-                <li>Pull median 90-day sold comps for each grade from 130point or eBay sold listings.</li>
-                <li>Pull current pop counts from psacard.com/pop for the exact card variant.</li>
-                <li>Use a 30–40% bias haircut by default; tighten it for cards you can inspect in hand.</li>
-                <li>Reject anything below 0.5 Sharpe unless you have a specific thesis (e.g., player breakout).</li>
-                <li>Re-run the calc on the day you submit — comps move.</li>
-              </ol>
-            </Section>
-          </div>
+          </article>
         )}
       </main>
 
-      <footer className="border-t border-stone-800 mt-16">
-        <div className="max-w-[1400px] mx-auto px-6 py-5 flex justify-between items-center text-[10px] text-stone-600 uppercase tracking-[0.2em]">
-          <div>Cardstack · Risk-Adjusted Grading EV</div>
-          <div>Not financial advice · Verify all comps</div>
+      <footer className="border-t border-line">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row gap-2 justify-between text-[13px] text-muted">
+          <div className="flex items-center gap-2">
+            <Logo />
+            <span>Cardstack</span>
+          </div>
+          <div>Not financial advice. Always verify comps before you submit.</div>
         </div>
       </footer>
     </div>
   );
 }
 
-function SectionHeader({ num, title }) {
-  return (
-    <div className="flex items-baseline gap-3 pb-2 border-b border-stone-800">
-      <span className="font-mono text-[10px] text-amber-500">{num}</span>
-      <span className="font-display text-lg font-semibold tracking-tight">{title}</span>
-    </div>
-  );
-}
-
 function Section({ title, children }) {
   return (
-    <div>
-      <h3 className="font-display text-lg font-semibold mb-3 text-stone-100">{title}</h3>
+    <section>
+      <h2 className="text-[19px] font-semibold tracking-[-0.02em] text-ink mb-3">{title}</h2>
       {children}
-    </div>
+    </section>
   );
 }
